@@ -1,0 +1,11 @@
+{
+  "schema": "debate-review.run.v1", "local": true, "base": {"name": "BASE", "sha": "BASE"}, "snapshotCommit": "HEAD",
+  "who": {"main": {"implementer": "codex", "lane": "review-main"}, "debate": {"implementer": "opencode", "lane": "review-debate"}},
+  "stages": {
+    "main": {"seconds": 100, "doc": {"schema": "debate-review.findings.v1", "head": "HEAD", "verdict": "needs-attention", "summary": "One blocker.", "findings": [
+      {"id": "F1", "file": "app.py", "line_start": 3, "line_end": 3, "severity": "blocking", "axis": "correctness", "claim": "x", "evidence": "app.py:3", "recommendation": "y", "confidence": 0.9}
+    ]}},
+    "debate": {"seconds": 80, "doc": {"schema": "debate-review.debate.v1", "head": "HEAD", "verdicts": [], "new_findings": []}}
+  },
+  "startedAt": "2026-09-10T10:00:00.000Z", "finishedAt": "2026-09-10T10:10:00.000Z"
+}

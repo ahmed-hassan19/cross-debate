@@ -1,0 +1,7 @@
+{"version":"delegate-fleet.v1","lanes":{
+  "plan-main-claude":{"implementer":"codex","model":"model-a","effort":"high"},
+  "plan-main":{"implementer":"claude","model":"model-b","effort":"medium"},
+  "plan-debate":{"implementer":"claude","model":"model-c","effort":"high"},
+  "review-main":{"implementer":"codex","model":"model-a","effort":"medium"},
+  "review-debate":{"implementer":"claude","model":"model-c","effort":"high"}
+}}

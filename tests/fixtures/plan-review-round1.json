@@ -1,0 +1,13 @@
+{
+  "schema": "debate-plan.review.v1", "round": 1, "plan_rating": 6,
+  "summary": "One blocking gap: F1 must be fixed to reach 9.",
+  "findings": [
+    {"id": "F1", "severity": "blocking", "axis": "correctness", "confidence": 0.9, "where": "Step 2", "claim": "The loader ignores CRLF files and mis-hashes them", "evidence": "src/loader.mjs:12", "recommendation": "Normalize CRLF before hashing"},
+    {"id": "F2", "severity": "non-blocking", "axis": "verification", "confidence": 0.7, "where": "Tests", "claim": "No test covers the empty-plan path", "evidence": "tests/workflow.test.mjs:1", "recommendation": "Add an empty-plan test"},
+    {"id": "F3", "severity": "non-blocking", "axis": "scope", "confidence": 0.4, "where": "Scope", "claim": "Low confidence claim that must be dropped", "evidence": "n/a", "recommendation": "n/a"}
+  ],
+  "assumptions": [
+    {"id": "A1", "decision": "Where should state live?", "recommended": "~/.local/share/debate because it is user-scoped", "options": ["~/.local/share/debate", "~/.cache/debate"]}
+  ],
+  "contests": []
+}

@@ -1,0 +1,11 @@
+{
+  "schema": "debate-plan.review.v1", "round": 2, "plan_rating": 7,
+  "summary": "F4 must be fixed to reach 9.",
+  "findings": [
+    {"id": "F4", "severity": "non-blocking", "axis": "completeness", "confidence": 0.8, "where": "Step 3", "claim": "Retry path lacks a log line", "evidence": "scripts/debate-plan.mjs:100", "recommendation": "Log the retry"}
+  ],
+  "assumptions": [],
+  "contests": [
+    {"id": "F2", "stance": "contest", "reason": "The added test does not assert the empty body", "evidence": "tests/workflow.test.mjs:41"}
+  ]
+}

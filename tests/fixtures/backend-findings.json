@@ -1,0 +1,22 @@
+{
+  "schema": "debate-review.run.v1", "local": true, "base": {"name": "BASE", "sha": "BASE"}, "snapshotCommit": "HEAD",
+  "who": {"main": {"implementer": "codex", "lane": "review-main"}, "debate": {"implementer": "opencode", "lane": "review-debate"}},
+  "stages": {
+    "main": {"seconds": 100, "doc": {"schema": "debate-review.findings.v1", "head": "HEAD", "verdict": "needs-attention", "summary": "One blocker.", "findings": [
+      {"id": "F1", "file": "app.py", "line_start": 3, "line_end": 3, "severity": "blocking", "axis": "correctness", "claim": "Division by zero when items is empty", "evidence": "app.py:3", "recommendation": "Guard the divisor", "confidence": 0.9},
+      {"id": "F2", "file": "app.py", "line_start": 1, "line_end": 1, "severity": "non-blocking", "axis": "docs", "claim": "Missing docstring", "evidence": "app.py:1", "recommendation": "Add one", "confidence": 0.6}
+    ]}},
+    "debate": {"seconds": 80, "doc": {"schema": "debate-review.debate.v1", "head": "HEAD", "verdicts": [
+      {"id": "F1", "verdict": "confirm", "reason": "reproduced", "evidence": "app.py:3"},
+      {"id": "F2", "verdict": "refute", "reason": "docstrings are not required here", "evidence": "CLAUDE.md:1"}
+    ], "new_findings": [
+      {"id": "D1", "file": "app.py", "line_start": 2, "line_end": 2, "severity": "blocking", "axis": "correctness", "claim": "Negative totals are not rejected", "evidence": "app.py:2", "recommendation": "Validate input", "confidence": 0.7}
+    ]}},
+    "final": {"seconds": 60, "doc": {"schema": "debate-review.final.v1", "head": "HEAD", "summary": "Fix F1.", "findings": [
+      {"id": "F1", "status": "agreed", "severity": "blocking", "file": "app.py", "line_start": 3, "line_end": 3, "claim": "Division by zero when items is empty", "evidence": "app.py:3", "recommendation": "Guard the divisor", "debate_note": "confirmed"},
+      {"id": "F2", "status": "withdrawn", "severity": "non-blocking", "file": "app.py", "line_start": 1, "line_end": 1, "claim": "Missing docstring", "evidence": "app.py:1", "recommendation": "Add one", "debate_note": "not required by standards"},
+      {"id": "D1", "status": "withdrawn", "severity": "blocking", "file": "app.py", "line_start": 2, "line_end": 2, "claim": "Negative totals are not rejected", "evidence": "app.py:2", "recommendation": "Validate input", "debate_note": "callers already validate"}
+    ]}}
+  },
+  "startedAt": "2026-09-10T10:00:00.000Z", "finishedAt": "2026-09-10T10:10:00.000Z"
+}

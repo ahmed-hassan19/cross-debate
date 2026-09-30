@@ -1,0 +1,8 @@
+{
+  "review_rating": 7,
+  "verdicts": [
+    {"id": "F1", "verdict": "discard", "reason": "CRLF is normalized upstream", "evidence": "src/loader.mjs:5"},
+    {"id": "F2", "verdict": "discard", "reason": "Covered", "evidence": "tests/workflow.test.mjs:40"}
+  ],
+  "contest_rulings": [], "assumptions": [], "missed": []
+}

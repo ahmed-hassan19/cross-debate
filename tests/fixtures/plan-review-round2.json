@@ -1,0 +1,9 @@
+{
+  "schema": "debate-plan.review.v1", "round": 2, "plan_rating": 9,
+  "summary": "Implement as written.",
+  "findings": [],
+  "assumptions": [],
+  "contests": [
+    {"id": "F2", "stance": "accept", "reason": "The orchestrator added the test", "evidence": "tests/workflow.test.mjs:40"}
+  ]
+}

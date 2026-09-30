@@ -1,0 +1,6 @@
+{
+  "review_rating": 6,
+  "verdicts": [{"id": "F4", "verdict": "modify", "reason": "Log exists but at debug level", "evidence": "scripts/debate-plan.mjs:100", "change": "Raised log level"}],
+  "contest_rulings": [{"id": "F2", "ruling": "reverse", "reason": "The reviewer is right, the assertion is missing", "evidence": "tests/workflow.test.mjs:41"}],
+  "assumptions": [], "missed": []
+}

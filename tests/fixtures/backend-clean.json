@@ -1,0 +1,9 @@
+{
+  "schema": "debate-review.run.v1", "local": true, "base": {"name": "BASE", "sha": "BASE"}, "snapshotCommit": "HEAD",
+  "who": {"main": {"implementer": "codex", "lane": "review-main"}, "debate": {"implementer": "opencode", "lane": "review-debate"}},
+  "stages": {
+    "main": {"seconds": 100, "doc": {"schema": "debate-review.findings.v1", "head": "HEAD", "verdict": "approve", "summary": "Looks fine.", "findings": []}},
+    "debate": {"seconds": 80, "doc": {"schema": "debate-review.debate.v1", "head": "HEAD", "verdicts": [], "new_findings": []}}
+  },
+  "startedAt": "2026-09-10T10:00:00.000Z", "finishedAt": "2026-09-10T10:05:00.000Z"
+}
