@@ -1,6 +1,6 @@
 # Debate operations
 
-`<debate-dir>` is the installed skill directory, resolved as SKILL.md describes. Substitute it before executing commands; use the quoted, literal absolute entrypoint path for native permission matching.
+`<cross-debate-dir>` is the installed skill directory, resolved as SKILL.md describes. Substitute it before executing commands; use the quoted, literal absolute entrypoint path for native permission matching.
 
 ## Scope
 
@@ -9,9 +9,9 @@ Automatic coverage is evaluated at invocation time for every seat. Only Git repo
 Inspect or change scope using the existing allowlisted entrypoint:
 
 ```sh
-node "<debate-dir>/scripts/debate.mjs" scope status --cwd "<repo>"
-node "<debate-dir>/scripts/debate.mjs" scope disable --cwd "<repo>"
-node "<debate-dir>/scripts/debate.mjs" scope enable --cwd "<repo>"
+node "<cross-debate-dir>/scripts/debate.mjs" scope status --cwd "<repo>"
+node "<cross-debate-dir>/scripts/debate.mjs" scope disable --cwd "<repo>"
+node "<cross-debate-dir>/scripts/debate.mjs" scope enable --cwd "<repo>"
 ```
 
 Status is read-only. Scope uses direct repository-local Git boolean `debate.enabled`, shared by linked worktrees; global/system/includes cannot enroll repositories. Missing or false means disabled; invalid or unreadable local-config reads mean disabled with a diagnostic. If Git cannot identify the repository, scope remains disabled with the existing null-identity behavior. Enrollment is shared by linked worktrees, but separate clones and nested repositories require their own enrollment. Use these commands rather than editing Git config: transitions supersede unconsumed push and delete approvals across linked worktrees. Disable refuses active candidates; finish or explicitly waive first. Missing/prunable/unreadable worktrees or ledgers require explicit repair before changing scope. Re-enabling never revives an old approval. Candidate ledgers remain worktree-specific.
@@ -35,8 +35,8 @@ If the user already explicitly authorized a specific conditional fallback, honor
 On an explicit choice to resume, quote the actual instruction and use the originating seat/session:
 
 ```sh
-node "<debate-dir>/scripts/debate.mjs" plan resume --run "<run>" --seat "<seat>" --session "<session>" --reason "user authorized: <actual choice>" --detach
-node "<debate-dir>/scripts/debate.mjs" code resume --run "<run>" --seat "<seat>" --session "<session>" --reason "user authorized: <actual choice>" --detach
+node "<cross-debate-dir>/scripts/debate.mjs" plan resume --run "<run>" --seat "<seat>" --session "<session>" --reason "user authorized: <actual choice>" --detach
+node "<cross-debate-dir>/scripts/debate.mjs" code resume --run "<run>" --seat "<seat>" --session "<session>" --reason "user authorized: <actual choice>" --detach
 ```
 
 Claude uses background execution instead of `--detach`/`wait`, except `wait --max-wait 1s` to reap a task that ended without output; every other host uses detach/wait. Omit lane flags to retain the previous reviewer. Only after the user explicitly selects a replacement, add plan `--reviewer-lane <configured-lane>` or code `--main-lane <configured-lane>` / `--debate-lane <configured-lane>`. Overrides are per-run, not global config edits; code lanes must have global bindings because review clones do not carry project trust. Every reviewer must use a relay that offers `--read-only`. Default pinned lanes remain unchanged without an authorized override.
@@ -48,8 +48,8 @@ Resume keeps all attempts and the same failed current-round snapshot; it grants 
 If the user chooses self-review, inspect the exact failed snapshot, write a separate report, and record it:
 
 ```sh
-node "<debate-dir>/scripts/debate.mjs" plan finish --run "<run>" --self-review "<report>" --reason "user authorized: <actual choice>"
-node "<debate-dir>/scripts/debate.mjs" code finish --run "<run>" --self-review "<report>" --reason "user authorized: <actual choice>"
+node "<cross-debate-dir>/scripts/debate.mjs" plan finish --run "<run>" --self-review "<report>" --reason "user authorized: <actual choice>"
+node "<cross-debate-dir>/scripts/debate.mjs" code finish --run "<run>" --self-review "<report>" --reason "user authorized: <actual choice>"
 ```
 
 Independent review remains failed; self-review cannot create a passed debate receipt. Code candidates stay active and require a separate explicit waiver before publication approval. Pausing requires no finish. Use code `defer` before asking if its Stop gate applies. Never fabricate the authorization quote.
@@ -86,3 +86,22 @@ The offline suite exercises every host adapter, lifecycle gates, scope transitio
 | OpenCode (experimental) | `tool.execute.before` through a generated plugin | manual use only | no | yes |
 
 `setup hooks --agent <host>` prints the exact entries; `setup doctor` reports which are installed. Every hook runs `debate.mjs hook <host> <event>`, exits 0 on internal errors (fail open), and passes unmapped events through. Claude reminds only in plan mode or while it owns an active candidate; Codex receives a plan or code instruction on every prompt. On Cursor and OpenCode, invoke the plan and code workflows yourself with `--seat cursor` or `--seat opencode` and an explicit `--session`.
+
+## Removal
+
+Run `npx cross-debate scope disable --cwd "/path/to/project"` for each attached clone first. If a candidate is active, finish it or explicitly waive it before disabling. Linked worktrees share enrollment.
+
+Then close your agent sessions and remove the following entries in your editor. Preserve unrelated settings; do not restore a whole old settings backup over newer edits.
+
+| Location (default) | Remove |
+|---|---|
+| `~/.claude/settings.json` | Hook commands ending in `debate.mjs" hook claude <event>`, and `permissions.allow` entries for this skill's `scripts/debate.mjs` |
+| `~/.codex/hooks.json` | Hook commands ending in `debate.mjs" hook codex <event>` |
+| `~/.cursor/hooks.json` | Hook commands ending in `debate.mjs" hook cursor <event>` |
+| `~/.config/opencode/plugins/debate.js` | This generated file, after checking its `Generated by` header points to this skill |
+| Each host's `skills/cross-debate` registration | The skill directory or symlink; remove a symlink itself, not its source checkout |
+| `~/.agents/skills/cross-debate` | The copied skill, after removing hooks and other registrations |
+
+Custom `CLAUDE_CONFIG_DIR`, `CODEX_HOME`, and `XDG_CONFIG_HOME` change those locations. If upgrading left a `skills/debate` compatibility directory, remove it only after checking no other host still uses it. In Codex's `config.toml`, remove this skill's state path from `sandbox_workspace_write.writable_roots` if nothing else uses it; leave other roots and the shared `features.hooks` setting intact.
+
+Reviewer lanes in `~/.config/delegate-skills/config.json` may be shared with other tools. Remove only the `plan-main`, `plan-main-<host>`, `plan-debate`, `review-main`, and `review-debate` entries you no longer use. Keep `~/.local/share/debate` (or `DEBATE_HOME`) and `~/.cache/debate-review` if you want review history and installer backups; deleting them is optional. Restart the agent after removal.

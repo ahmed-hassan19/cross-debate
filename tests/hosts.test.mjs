@@ -8,7 +8,7 @@ import { spawnSync } from 'node:child_process';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
-const SKILL = path.resolve(HERE, '..', 'skills', 'debate');
+const SKILL = path.resolve(HERE, '..', 'skills', 'cross-debate');
 const SCRIPTS = path.join(SKILL, 'scripts');
 const CLI = path.join(SCRIPTS, 'debate.mjs');
 const SCRATCH = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'debate-hosts-')));
@@ -95,7 +95,7 @@ test('unmapped events pass through for every host, and an unknown agent is a usa
 });
 
 test('mergeHooks is idempotent, keeps unrelated hooks, and replaces earlier debate entries for that agent only', () => {
-  const cli = '/opt/skills/debate/scripts/debate.mjs';
+  const cli = '/opt/skills/cross-debate/scripts/debate.mjs';
   const existing = {
     permissions: { allow: ['Bash(ls:*)'] },
     hooks: {
@@ -195,8 +195,8 @@ test('setup lanes proposes only missing lanes, pairs seats with another CLI, and
 test('setup hooks prints entries through the invoked symlink path, and --write refuses without a terminal', () => {
   const catalog = path.join(SCRATCH, 'catalog');
   fs.mkdirSync(catalog, { recursive: true });
-  fs.symlinkSync(SKILL, path.join(catalog, 'debate'));
-  const linked = path.join(catalog, 'debate', 'scripts', 'debate.mjs');
+  fs.symlinkSync(SKILL, path.join(catalog, 'cross-debate'));
+  const linked = path.join(catalog, 'cross-debate', 'scripts', 'debate.mjs');
   const claudeDir = path.join(SCRATCH, 'claude-config');
   const r = run(['setup', 'hooks', '--agent', 'claude'], { cli: linked, env: { CLAUDE_CONFIG_DIR: claudeDir } });
   assert.equal(r.status, 0, r.stderr);
@@ -491,6 +491,9 @@ test('a debate reviewer that supplies new_findings as anything but an array is r
   const doc = (extra) => ({ schema: 'debate-review.debate.v1', verdicts: [], ...extra });
   assert.deepEqual(validateDebate(doc({}), { findings: [] }).new_findings, []);
   for (const bad of [{ id: 'D1' }, 'D1', null]) assert.throws(() => validateDebate(doc({ new_findings: bad }), { findings: [] }), /new_findings must be an array/);
+  const incomplete = doc({ verdicts: [{ id: 'F1', verdict: 'confirm' }] });
+  assert.throws(() => validateDebate(incomplete, { findings: [{ id: 'F1' }, { id: 'F2' }] }), /F2 has no debate verdict/);
+  assert.equal(incomplete.verdicts.length, 1, 'the validator must not invent agreement');
 });
 
 test('plan pairing compares models, so two lanes on one CLI with different models are not flagged', () => {
@@ -627,7 +630,11 @@ test('scope prints a short summary at a terminal and the full JSON otherwise', a
   const text = scopeSummary({ identity: { worktreeRoot: '/r' }, enabled: true, effective: true, warnings: [], supersededApprovals: 0, activeCandidates: [] });
   assert.match(text, /^debate is enabled for \/r\nStart a fresh agent session/);
   assert.doesNotMatch(text, /repoKey/);
+  assert.match(scopeSummary({ identity: null, enabled: false, effective: false }), /not a Git worktree/);
   const repo = enrolledRepo('scope-json-repo');
   const r = run(['scope', 'status', '--cwd', repo]);
   assert.equal(JSON.parse(r.stdout).enabled, true, 'without a terminal agents still get JSON');
+  const here = spawnSync(process.execPath, [CLI, 'scope', 'status'], { cwd: repo, encoding: 'utf8' });
+  assert.equal(here.status, 0, here.stderr);
+  assert.equal(JSON.parse(here.stdout).identity.worktreeRoot, repo, 'scope defaults to the current project');
 });

@@ -4,7 +4,7 @@ Only you communicate with the user. Verify every source finding, including withd
 Never push without explicit candidate-and-destination approval; never amend published history.
 Keep the candidate local throughout review; do not bypass project checks or use --no-verify.
 Commands use your seat (`claude`, `codex`, `cursor` or `opencode`) and the hook-provided session ID.
-`<debate-dir>` and the scope rules are defined in the skill's SKILL.md. Outside automatic scope, invoke only on
+`<cross-debate-dir>` and the scope rules are defined in the skill's SKILL.md. Outside automatic scope, invoke only on
 explicit request; approval requirements still apply even though automatic review and permit guards are inactive.
 The `review` subcommand ([review](review.md)) is the backend; explicit review requests do not require enrollment.
 For scope, dirty artifacts, recovery, or hook verification, read [operations](operations.md).
@@ -22,7 +22,7 @@ completes, reads the result with `code wait --run "<run>" --max-wait 1s`. Every 
    implementation is introduced, and treat resulting cuts as amendments that need re-review.
    Inspect inherited changes before staging; do not silently absorb unrelated work.
    For an unfinished checkpoint or necessary question:
-   node "<debate-dir>/scripts/debate.mjs" code defer --seat "<seat>" --session "<session>" --cwd "<cwd>" --reason "<why unfinished>"
+   node "<cross-debate-dir>/scripts/debate.mjs" code defer --seat "<seat>" --session "<session>" --cwd "<cwd>" --reason "<why unfinished>"
    A deferral cannot accompany a completion claim and never permits a push.
    This is honor-based: the hook consumes a deferral on the next Stop without interpreting completion intent.
    Do not use `defer` merely because a review worker is running in the background. A deferral does not wait
@@ -32,19 +32,19 @@ completes, reads the result with `code wait --run "<run>" --max-wait 1s`. Every 
    git reset --soft "<before-change-sha>"   then   git commit -m "<type>: <description>"
    Then use begin --adopt below; adoption accepts only one commit with the base as its sole parent.
    Otherwise start a fresh candidate before committing:
-   node "<debate-dir>/scripts/debate.mjs" code begin --seat "<seat>" --session "<session>" --cwd "<cwd>"
+   node "<cross-debate-dir>/scripts/debate.mjs" code begin --seat "<seat>" --session "<session>" --cwd "<cwd>"
    Default base is current HEAD, not the session's original baseline. Retain the returned runId.
    In the repository cwd, run these as separate shell tool calls:
    git add -A
    git commit -m "<type>: <description>"
    If the candidate was already committed without begin, adopt only that unpublished HEAD:
-   node "<debate-dir>/scripts/debate.mjs" code begin --seat "<seat>" --session "<session>" --cwd "<cwd>" --adopt --base "<sole-parent-sha>" --reason "<evidence it is unpublished>"
+   node "<cross-debate-dir>/scripts/debate.mjs" code begin --seat "<seat>" --session "<session>" --cwd "<cwd>" --adopt --base "<sole-parent-sha>" --reason "<evidence it is unpublished>"
    Use your observed commit-without-push history or explicit user confirmation as evidence.
    If publication status is unknown, ask the user before adoption; do not infer it from stale remote refs.
    A parent mismatch must be resolved explicitly; do not rewrite earlier commits to make adoption pass.
 
 3. If Stop reports no session baseline, explicitly register the known before-change commit:
-   node "<debate-dir>/scripts/debate.mjs" code baseline --seat "<seat>" --session "<session>" --cwd "<cwd>" --base "<before-change-sha>" --reason "<basis for this baseline>"
+   node "<cross-debate-dir>/scripts/debate.mjs" code baseline --seat "<seat>" --session "<session>" --cwd "<cwd>" --base "<before-change-sha>" --reason "<basis for this baseline>"
    HEAD is acceptable only when nothing changed; registration is audited.
    For an already-created candidate, use its intended sole parent and then the adoption command.
    On a promotion turn (merge, pull, or checkout of reviewed work) Stop passes on its own when HEAD moved only by
@@ -54,7 +54,7 @@ completes, reads the result with `code wait --run "<run>" --max-wait 1s`. Every 
 
 4. Review the candidate.
    Claude: invoke this Bash command with run_in_background: true:
-   node "<debate-dir>/scripts/debate.mjs" code review --run "<run>" --timeout 30m
+   node "<cross-debate-dir>/scripts/debate.mjs" code review --run "<run>" --timeout 30m
    When the background task completes, take the result from wait --run "<run>" --max-wait 1s: it prints the recorded
    review document as clean JSON (the task output file ends with a host exit-status line, so it is not valid JSON),
    and it also reaps a worker that died without recording a result.
@@ -63,9 +63,9 @@ completes, reads the result with `code wait --run "<run>" --max-wait 1s`. Every 
    completion, then record the verdict and finish. If the worker is dead, use the one-second wait command and
    follow the recorded recovery state.
    Other hosts (Codex: request review-prefix escalation first) run:
-   node "<debate-dir>/scripts/debate.mjs" code review --run "<run>" --timeout 30m --detach
+   node "<cross-debate-dir>/scripts/debate.mjs" code review --run "<run>" --timeout 30m --detach
    Then observe (inside workspace-write on Codex):
-   node "<debate-dir>/scripts/debate.mjs" code wait --run "<run>" --max-wait 60s
+   node "<cross-debate-dir>/scripts/debate.mjs" code wait --run "<run>" --max-wait 60s
    On Codex, recommend approve-for-prefix for git separately: .git writes are not covered by the review approval.
    Without reused approvals, budget 1 review + 2 initial Git approvals + up to 3 amend approvals.
    Re-staging fixes can add further Git approvals; a reusable git prefix covers those Git operations.
@@ -102,7 +102,7 @@ completes, reads the result with `code wait --run "<run>" --max-wait 1s`. Every 
      "checks":[{"command":"<project check>","result":"passed"}]
    }
    Use wrapper-returned IDs; validate withdrawn findings instead of automatically discarding them.
-   node "<debate-dir>/scripts/debate.mjs" code verdict --run "<run>" --round <n> --verdicts "<verdict-file>"
+   node "<cross-debate-dir>/scripts/debate.mjs" code verdict --run "<run>" --round <n> --verdicts "<verdict-file>"
    A declared fix requires an actual candidate tree change; finish refuses next=continue.
    Continue iff a correction requires re-review and round < 3; repeat step 4 with the same run.
    Set no_further_review true only when every amendment answers a non-blocking finding; the round then stops as
@@ -111,25 +111,27 @@ completes, reads the result with `code wait --run "<run>" --max-wait 1s`. Every 
    At round three, amended content is changed_after_review; do not claim it passed.
 
 8. Finish:
-   node "<debate-dir>/scripts/debate.mjs" code finish --run "<run>"
+   node "<cross-debate-dir>/scripts/debate.mjs" code finish --run "<run>"
    Report candidate SHA, review outcome, relevant checks, and unresolved findings; the commit remains local.
    Unfixed blockers record blocked and keep the candidate active: while round < 3, amend the fix and code review --run "<run>" again on a changed tree.
    At round 3, exhausted_with_blockers stays frozen; only an explicitly approved waive can close it.
    Every waiver, including a prose typo/comment-only candidate, requires explicit user approval:
    code waive --run "<run>" --reason "user approved: <actual instruction>".
+   If HEAD is still the original base and the worktree is clean, this abandons the run without a review receipt
+   or publication approval. It also frees the worktree for another candidate or scope disable.
    Security, auth, config, migration, and dependency changes are not trivial by size.
    Failure, blockers, secrets_detected, or unreviewed corrections require explicit user approval before waiver.
 
 9. Only after presenting the concrete result, ask whether to push this candidate to the named destination.
    After explicit approval, and waiver first if required:
-   node "<debate-dir>/scripts/debate.mjs" code approve-push --run "<run>" --remote "<remote>" --ref "refs/heads/<branch>" --reason "user approved: <quote>"
+   node "<cross-debate-dir>/scripts/debate.mjs" code approve-push --run "<run>" --remote "<remote>" --ref "refs/heads/<branch>" --reason "user approved: <quote>"
    Execute only the exact push command returned; it starts with cd '<worktree>' && so it works from any tool
    working directory. Do not add refs, force, tags, or another destination.
    Approval is consumed for that attempt. Failure requires a new explicit retry approval.
    Never infer publication success from a timeout. Never amend a candidate after publication approval.
 
    Deleting a merged PR's branch needs no run, only explicit user approval, one branch per approval:
-   node "<debate-dir>/scripts/debate.mjs" code approve-delete --cwd "<worktree>" --remote "<remote>" --ref "refs/heads/<branch>" --pr "<PR URL>" --reason "user approved: <quote>"
+   node "<cross-debate-dir>/scripts/debate.mjs" code approve-delete --cwd "<worktree>" --remote "<remote>" --ref "refs/heads/<branch>" --pr "<PR URL>" --reason "user approved: <quote>"
    The PR must be the one merged into the intended upstream. It verifies with gh that the PR is merged from that
    branch of the remote's push repository and that the branch hasn't moved since, and refuses the default branch.
    Execute only the returned command; its --force-with-lease makes Git refuse the delete if the branch moved.

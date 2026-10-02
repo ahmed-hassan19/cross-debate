@@ -673,7 +673,8 @@ function waiveCommand(flags) {
   const ledger = requireActive(home, run);
   const root = identity.worktreeRoot;
   const state = candidateStateFor(root, ledger.active);
-  if (state.state !== 'candidate') throw usage(`HEAD ${String(state.head).slice(0, 12)} is not a candidate commit of base ${run.code.baseSha.slice(0, 12)}; a waiver needs a committed candidate`);
+  const abandoned = state.state === 'awaiting';
+  if (state.state !== 'candidate' && !abandoned) throw usage(`HEAD ${String(state.head).slice(0, 12)} is not a candidate commit of base ${run.code.baseSha.slice(0, 12)}; restore the candidate or its unchanged base before waiving`);
   if (porcelainStatus(root).length) throw usage('worktree is not clean; stage and commit or amend before waiving');
   const tree = treeOf(root, state.head);
   const session = loadSession(home, run.seat, run.sessionId);
@@ -681,18 +682,26 @@ function waiveCommand(flags) {
   const waiver = { eventId: newEventId(), reason: flags.reason, at: now, seat: run.seat, sessionId: run.sessionId, generation: session ? session.generation : 0, waivedFrom: run.outcome || run.status, commitSha: state.head };
   const finished = updateRun(home, run.runId, (cur) => {
     cur.status = 'finished';
-    cur.outcome = 'waived';
+    cur.outcome = abandoned ? 'abandoned' : 'waived';
     cur.finishedAt = cur.finishedAt || now;
     cur.waiver = waiver;
-    cur.code.candidateCommit = state.head;
-    cur.code.candidateTree = tree;
+    cur.code.candidateCommit = abandoned ? null : state.head;
+    cur.code.candidateTree = abandoned ? null : tree;
+    if (abandoned) cur.code.phase = 'abandoned';
     return cur;
   });
-  closeCandidate(home, finished, identity, 'waived', { waiverEventId: waiver.eventId });
-  updateLedger(home, identity, (l) => { l.waivers.push({ ...waiver, runId: run.runId }); return l; });
+  if (!abandoned) closeCandidate(home, finished, identity, 'waived', { waiverEventId: waiver.eventId });
+  updateLedger(home, identity, (l) => {
+    if (abandoned && l.active?.runId === run.runId) {
+      l.active = null;
+      auditEvent(l, { type: 'candidate_abandoned', runId: run.runId, reason: flags.reason, baseSha: state.head });
+    }
+    l.waivers.push({ ...waiver, runId: run.runId });
+    return l;
+  });
   appendAuditRow(home, { type: 'waiver', eventId: waiver.eventId, kind: 'code', runId: run.runId, seat: run.seat, sessionId: run.sessionId, generation: waiver.generation, repoKey: identity.repoKey, commitSha: state.head, waivedFrom: waiver.waivedFrom, reason: flags.reason, at: now });
   upsertStatsRow(home, statsRowFromRun(finished));
-  printJson({ ok: true, runId: run.runId, outcome: 'waived', waivedFrom: waiver.waivedFrom, candidateCommit: state.head, waiver, candidateClosed: true, baselineAdvanced: true, note: 'a waiver never authorizes a push' });
+  printJson({ ok: true, runId: run.runId, outcome: finished.outcome, waivedFrom: waiver.waivedFrom, candidateCommit: finished.code.candidateCommit, waiver, candidateClosed: true, baselineAdvanced: !abandoned, note: abandoned ? 'unchanged candidate abandoned; no review receipt or publication approval was created' : 'a waiver never authorizes a push' });
   return 0;
 }
 function deferCommand(flags) {

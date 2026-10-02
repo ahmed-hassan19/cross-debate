@@ -57,7 +57,7 @@ export function validateFindings(doc, role = 'main') {
 
 /**
  * debate-review.debate.v1. checked against the findings it answers.
- * Missing verdicts are filled as confirm ("no objection"), as schema.md promises; duplicates are errors.
+ * Every finding needs an explicit verdict; silence is not independent confirmation.
  */
 export function validateDebate(doc, findings, role = 'debate') {
   if (!doc || doc.schema !== 'debate-review.debate.v1') throw problem(role, 'expected schema debate-review.debate.v1');
@@ -75,7 +75,7 @@ export function validateDebate(doc, findings, role = 'debate') {
     answered.add(v.id);
   });
   for (const id of known) {
-    if (!answered.has(id)) doc.verdicts.push({ id, verdict: 'confirm', reason: 'no objection', evidence: '' });
+    if (!answered.has(id)) throw problem(role, `finding ${id} has no debate verdict`);
   }
 
   doc.new_findings.forEach((f, i) => checkFinding(role, f, i, { idPrefix: 'D', needStatus: false }));

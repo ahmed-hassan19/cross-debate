@@ -1,21 +1,6 @@
-# debate
+# cross-debate
 
-## Special thanks
-
-This project stands on other people's work:
-
-- **Ahmed Nagdy** ([@amElnagdy](https://github.com/amElnagdy)) for
-  [delegate-skills](https://github.com/amElnagdy/delegate-skills) (the relays and lane configuration bundled here) and
-  [review-skills](https://github.com/amElnagdy/review-skills) (the debate-review backend this skill adapts, and
-  babysit-pr). Both MIT.
-- **Matt Pocock** ([@mattpocock](https://github.com/mattpocock)) for
-  [grill-me](https://github.com/mattpocock/skills), which inspired the plan review's decision interview. MIT.
-- **Dietrich Gebert** ([@DietrichGebert](https://github.com/DietrichGebert)) for
-  [ponytail](https://github.com/DietrichGebert/ponytail), the optional over-engineering pass before code review. MIT.
-- **Vercel Labs** for the [skills CLI](https://github.com/vercel-labs/skills) used to install this skill. MIT.
-
-Bundled and adapted code, with pinned upstream commits and license texts, is listed in
-[THIRD_PARTY_NOTICES.md](skills/debate/THIRD_PARTY_NOTICES.md).
+Cross-agent review for plans, code, and pull requests.
 
 ## What it does
 
@@ -25,6 +10,104 @@ A skill for coding agents that makes two different models argue about your work 
 - **Finished code** is committed as one local candidate, reviewed by a main and a debate reviewer, and only
   pushed after you approve that exact commit and destination.
 - **Pull requests** (or a working tree) get a two-model review posted as one GitHub `COMMENT` review.
+
+## Start here: install, attach a project, and use
+
+On macOS or Linux, you need **Node 22+**, Git, and at least one signed-in reviewer CLI on `PATH`: `claude`, `codex`, or
+`opencode`. Two different reviewers are recommended. You need authenticated `gh` only for GitHub PR reviews
+and merged-branch deletion.
+
+### 1. Install and attach your project
+
+The npm release is pending. To try the installer from this checkout today:
+
+```sh
+npm ci
+npm exec -- cross-debate
+```
+
+Once published, run this from your project's directory:
+
+```sh
+npx cross-debate@latest
+```
+
+The wizard asks where you work, offers detected reviewers or lets you choose models, and asks whether to
+attach the current Git project. It shows one summary before applying changes. You do not need a config file.
+It installs the skill, merges hooks and reviewer settings, and updates Codex's TOML settings while preserving
+existing writable roots. Cancel before applying to leave settings unchanged.
+
+If you started the installer outside your project, attach it afterward:
+
+```sh
+npx cross-debate scope enable --cwd "/absolute/path/to/your-project"
+```
+
+Before the npm release, use `npm exec -- cross-debate` in place of `npx cross-debate` from this checkout for
+all commands below. Project attachment lives in local Git configuration, covers linked worktrees, and commits
+nothing. Each teammate and clone opts in separately.
+
+Restart your agent. In Codex, review and trust the new hooks when prompted. The installer configures the
+files; you still need a signed-in reviewer and a fresh agent session to run a review.
+
+### 2. Use it
+
+In Claude Code or Codex plan mode, replace the bracketed text and send:
+
+```text
+Plan [the change I want]. Use cross-debate to cross-review the plan before presenting it.
+```
+
+After agreeing on the plan:
+
+```text
+Implement the plan and use cross-debate to review the result before reporting done.
+```
+
+The agent reviews a local candidate commit and fixes confirmed blockers. It asks for approval before pushing
+that exact commit. Cursor and OpenCode need these explicit requests; their hooks cover Git commit/push only.
+
+To review a GitHub PR without posting yet:
+
+```sh
+npx cross-debate review https://github.com/OWNER/REPO/pull/123 --dry-run
+```
+
+Omit `--dry-run` to post the GitHub review. Explicit review requests also work in unattached projects.
+
+<details>
+<summary>Update, check setup, or stop automatic reviews</summary>
+
+| What you want | Command |
+|---|---|
+| Update the skill or choose different reviewers | `npx cross-debate@latest` |
+| Check dependencies and configuration | `npx cross-debate setup doctor` |
+| Show the CLI and installed skill versions | `npx cross-debate --version` |
+| Check the current project's enrollment | `npx cross-debate scope status` |
+| Turn automatic reviews off for the current clone | `npx cross-debate scope disable` |
+
+Warnings about unused hosts do not require installing them. Doctor does not test reviewer authentication
+or native hook trust.
+Project overrides in `.delegate/config.json` must be explicitly trusted for plan review. Code-review lanes
+must use global bindings. If an override is unintended, remove that lane from the project config and rerun the check;
+the installer preserves project settings and never grants trust automatically.
+
+The installer backs up replaced entries under `~/.local/share/debate/install-backups/` (or `DEBATE_HOME`).
+Each backup includes a manifest of original paths. When upgrading from `debate`, it keeps old script paths
+working, migrates selected hosts to the new skill registration, and preserves existing state, reviewer choices, and
+`debate.enabled`. It never overwrites the checkout behind an existing skill symlink.
+It keeps a shared legacy registration if an unselected host still needs it; select that host on a later run to
+finish migration.
+
+The installer stops before applying if a settings file is malformed or symlinked. It also refuses an existing
+`writable_roots` array inside an inline Codex table: convert that table to `[sandbox_workspace_write]` first.
+Existing settings remain unchanged if these checks fail.
+
+To remove cross-debate completely, follow [the removal steps](skills/cross-debate/references/operations.md#removal).
+
+</details>
+
+## How reviews work
 
 **Plan review**
 
@@ -56,79 +139,6 @@ a second model agreeing is not treated as proof. Hooks enforce the flow: in an e
 presented without a valid review receipt, the agent cannot stop with unreviewed changes, and `git push` only
 runs in the exact form you approved.
 
-## Install
-
-Requirements: Node 18+, Git, and at least one reviewer CLI on `PATH` (`claude`, `codex`, or `opencode`); two
-different ones give a real second opinion. `gh` (authenticated) for PR review and merged-branch deletion.
-
-With the [skills CLI](https://github.com/vercel-labs/skills) (symlinks by default, `--copy` to copy):
-
-```sh
-npx skills add ahmed-hassan19/debate-skill -g
-```
-
-Run it in a normal terminal, not inside an agent session: the skills CLI detects an agent and then installs to
-every agent non-interactively. It also offers its own `find-skills` skill, which you can decline.
-
-Or clone and link it yourself:
-
-```sh
-git clone https://github.com/ahmed-hassan19/debate-skill.git ~/src/debate-skill
-ln -s ~/src/debate-skill/skills/debate ~/.agents/skills/debate   # or ~/.claude/skills/debate, ~/.codex/skills/debate
-```
-
-The delegate-skills relays and lane validator it needs are bundled and pinned, and always used: installing or
-updating delegate-skills elsewhere never changes this skill's behaviour. Set `DELEGATE_SKILLS_DIR` to use another
-checkout on purpose.
-
-## Setup
-
-Run setup in **your own terminal**, through the path your agent loads the skill from: permission allowlists
-match paths literally. With `-g`, the skills CLI (1.7) installs the skill once in `~/.agents/skills/debate`, which
-Codex, Cursor, OpenCode and other agents read directly, and adds a symlink at `~/.claude/skills/debate` for Claude
-Code if you select it. `npx skills ls -g` lists what is installed. Then run once:
-
-```sh
-D=~/.agents/skills/debate/scripts/debate.mjs   # or ~/.claude/skills/debate/... if you use Claude Code
-node "$D" setup init
-```
-
-Terms the wizard uses:
-
-- **Lane:** a named reviewer slot (`plan-main`, `plan-debate`, `review-main`, `review-debate`), bound to one reviewer CLI
-  and optionally a model and effort.
-- **Implementer:** the CLI that runs a lane (`claude`, `codex` or `opencode`).
-- **Seat:** the agent you are working in. `plan-main-<seat>` lets each agent get a different first plan reviewer.
-
-`init` shows the proposed reviewer lanes and lets you change any lane's CLI, model and effort (Enter keeps the
-shown default), then asks whether to install the hooks for each agent it finds, and whether to install the optional skills below that are
-missing; then it runs `doctor`. The individual commands remain for scripting:
-
-```sh
-node "$D" setup lanes                  # proposes missing reviewer lanes; add --write to apply
-node "$D" setup hooks --agent claude   # or codex | cursor | opencode; add --write to merge
-node "$D" setup doctor                 # checks node, git, gh, CLIs, lanes, relays, DEBATE_HOME, hooks
-```
-
-`--write` shows the change, asks `y/N`, keeps a `*.debate-bak` backup, and refuses to run without a terminal, so
-an agent cannot silently change its own settings. For OpenCode lanes pass `--opencode-model provider/model`. For
-Codex, `setup hooks` also prints the `config.toml` lines to add yourself (hooks feature flag and the debate store
-as a writable root); Codex asks you to trust the new hooks on its next start. Restart the agent afterwards.
-
-## Getting started
-
-1. Enroll each repository where reviews should run automatically (automation is off everywhere else):
-   `node "$D" scope enable --cwd /path/to/repo`. This sets `debate.enabled=true` in that clone's own
-   `.git/config`; nothing is committed, so every clone (and each teammate) enrolls separately.
-2. Start a fresh agent session there and plan in plan mode. Before the plan is shown, the agent runs the plan
-   review, asks you its remaining decisions in one batch, and appends a review block.
-3. Let it implement. Before it reports done, it commits one candidate, runs the code review, fixes confirmed
-   blockers, and asks whether to push. Nothing is pushed without your explicit approval.
-4. For a pull request, ask for a review, or run `node "$D" review <PR URL>` (`--dry-run` prints instead of posting,
-   `--local` reviews the working tree).
-
-Outside enrolled repositories every workflow still works when you ask for it explicitly.
-
 ## Host support
 
 | Host | Plan gate | Stop gate (unreviewed code) | Git commit/push gate | Reminders |
@@ -142,6 +152,9 @@ On Cursor and OpenCode, ask the agent to use the skill; it runs the plan and cod
 
 ## Optional configuration
 
+Setup generates this configuration; you do not need to write a lane file to get started. A **lane** is a named
+reviewer slot, its **implementer** is the CLI that runs it, and a **seat** is the agent you are working in.
+
 - **Lanes** live in the delegate-skills config (`~/.config/delegate-skills/config.json`):
   `plan-main`, `plan-debate`, `review-main`, `review-debate`. Each binds an implementer with optional dials
   (`model`, `effort`/`variant`). `plan-main-<seat>` (for example `plan-main-claude`) overrides `plan-main` for one
@@ -151,7 +164,43 @@ On Cursor and OpenCode, ask the agent to use the skill; it runs the plan and cod
 - **Stores:** run state and receipts in `DEBATE_HOME`; review artifacts in `~/.cache/debate-review/`.
 - **Allowlist:** one entry covers every command, e.g. `Bash(node "<path>/debate.mjs":*)`; `setup hooks --agent
   claude` prints it for both the catalog path and its real path.
-- **Statistics:** `node "$D" stats [--kind plan|code] [--since 30d]`.
+- **Statistics:** `npx cross-debate stats [--kind plan|code] [--since 30d]`.
+
+<details>
+<summary>Manual setup commands and installation from a clone</summary>
+
+For a Node 18+ installation without the npm wizard, clone the repository and link the skill into a directory
+your agent reads. This example uses Claude Code:
+
+```sh
+mkdir -p ~/src ~/.claude/skills
+git clone https://github.com/ahmed-hassan19/debate-skill.git ~/src/debate-skill
+ln -s ~/src/debate-skill/skills/cross-debate ~/.claude/skills/cross-debate
+D="$HOME/.claude/skills/cross-debate/scripts/debate.mjs"
+node "$D" setup init
+node "$D" scope enable --cwd "/absolute/path/to/your-project"
+```
+
+For Codex, use `~/.agents/skills` instead of `~/.claude/skills`. `setup init` uses the older text wizard and
+prints the Codex TOML changes for you to merge manually. Preserve existing tables and writable roots:
+
+```toml
+[features]
+hooks = true
+
+[sandbox_workspace_write]
+writable_roots = ["/absolute/path/to/your-home/.local/share/debate"]
+```
+
+Restart your agent and trust the hooks when prompted, then use the prompts in Start here.
+To preview individual settings, use `node "$D" setup lanes` or `node "$D" setup hooks --agent claude`.
+Add `--write` to apply a preview in your own terminal. For OpenCode lanes, add
+`--opencode-model provider/model` to `setup lanes`.
+
+The bundled delegate-skills relays and lane validator are pinned; another installation of delegate-skills does
+not affect cross-debate. Set `DELEGATE_SKILLS_DIR` only to use another checkout deliberately.
+
+</details>
 
 ## Optional integrations
 
@@ -175,20 +224,22 @@ wrappers, substitutions, and unusual syntax around `git push` are denied rather 
 shell access can bypass hooks (for example `DEBATE=off`). Reviewers run read-only through their relays in a disposable
 checkout stripped of project agent configuration (hooks, plugins, MCP servers), and the outgoing diff is scanned for
 secrets before any reviewer sees it. See
-[operations](skills/debate/references/operations.md) for the full behaviour.
+[operations](skills/cross-debate/references/operations.md) for the full behaviour.
 
 ## Development
 
 ```sh
-node --test tests/*.test.mjs
+npm ci
+npm test
 ```
 
-The suites are offline and hermetic (scratch `HOME`, no model calls). CI runs them on Ubuntu and macOS with Node 18
-and 22.
+The suites are offline and hermetic (scratch `HOME`, no model calls). CI tests the dependency-free skill runtime on Node 18 and 22, and the installer on Node 22,
+on Ubuntu and macOS. The npm package includes the complete skill; installed hooks need no npm dependencies.
+See [CONTRIBUTING.md](CONTRIBUTING.md) for package verification, bug reports, and the release checklist.
 
 ### Updating the bundled delegate-skills
 
-The seven files under `skills/debate/vendor/delegate-skills/` are byte-identical copies of one upstream commit. To move
+The seven files under `skills/cross-debate/vendor/delegate-skills/` are byte-identical copies of one upstream commit. To move
 to a newer commit (for reviewer CLI changes, or lanes for implementers the bundled validator does not know yet):
 
 ```sh
@@ -196,14 +247,32 @@ git clone https://github.com/amElnagdy/delegate-skills.git /tmp/ds && git -C /tm
 for f in claude-delegate/scripts/relay.mjs codex-delegate/scripts/relay.mjs opencode-delegate/scripts/relay.mjs \
          delegate-setup/scripts/config.mjs delegate-setup/scripts/lane.mjs delegate-setup/scripts/implementers.mjs \
          delegate-setup/scripts/discover.mjs; do
-  cp "/tmp/ds/skills/$f" "skills/debate/vendor/delegate-skills/$f"
+  cp "/tmp/ds/skills/$f" "skills/cross-debate/vendor/delegate-skills/$f"
 done
 node --test tests/*.test.mjs
 ```
 
-Then update the pinned commit in [THIRD_PARTY_NOTICES.md](skills/debate/THIRD_PARTY_NOTICES.md) and review the relay
+Then update the pinned commit in [THIRD_PARTY_NOTICES.md](skills/cross-debate/THIRD_PARTY_NOTICES.md) and review the relay
 diff before committing: the relays run the reviewer CLIs, and `--read-only` must stay in each relay's `--help`.
+
+## Special thanks
+
+This project stands on other people's work:
+
+- **Ahmed Nagdy** ([@amElnagdy](https://github.com/amElnagdy)) for
+  [delegate-skills](https://github.com/amElnagdy/delegate-skills) (the relays and lane configuration bundled here) and
+  [review-skills](https://github.com/amElnagdy/review-skills) (the debate-review backend this skill adapts, and
+  babysit-pr). Both MIT.
+- **Matt Pocock** ([@mattpocock](https://github.com/mattpocock)) for
+  [grill-me](https://github.com/mattpocock/skills), which inspired the plan review's decision interview. MIT.
+- **Dietrich Gebert** ([@DietrichGebert](https://github.com/DietrichGebert)) for
+  [ponytail](https://github.com/DietrichGebert/ponytail), the optional over-engineering pass before code review. MIT.
+- **Vercel Labs** for the [skills CLI](https://github.com/vercel-labs/skills), which informed the installer flow. MIT.
+- **Bombshell** for [Clack](https://github.com/bombshell-dev/clack), the installer prompts. MIT.
+
+Bundled and adapted code, with pinned upstream commits and license texts, is listed in
+[THIRD_PARTY_NOTICES.md](skills/cross-debate/THIRD_PARTY_NOTICES.md).
 
 ## License
 
-MIT, see [LICENSE](LICENSE). Third-party code: [THIRD_PARTY_NOTICES.md](skills/debate/THIRD_PARTY_NOTICES.md).
+MIT, see [LICENSE](LICENSE). Third-party code: [THIRD_PARTY_NOTICES.md](skills/cross-debate/THIRD_PARTY_NOTICES.md).

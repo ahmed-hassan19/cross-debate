@@ -1,0 +1,19 @@
+{
+  "name": "cross-debate",
+  "version": "0.1.0",
+  "description": "Cross-agent review for plans, code, and pull requests.",
+  "type": "module",
+  "license": "MIT",
+  "repository": "github:ahmed-hassan19/debate-skill",
+  "bin": { "cross-debate": "bin/cross-debate.mjs" },
+  "files": ["bin/", "skills/cross-debate/"],
+  "engines": { "node": ">=22" },
+  "scripts": {
+    "test": "node --test tests/*.test.mjs",
+    "test:installer": "node --test tests/installer.test.mjs"
+  },
+  "dependencies": {
+    "@clack/prompts": "1.8.1",
+    "@rainbowatcher/toml-edit-js": "0.6.5"
+  }
+}

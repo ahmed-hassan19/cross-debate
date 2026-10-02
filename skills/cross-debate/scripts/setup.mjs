@@ -8,8 +8,9 @@ import { pathToFileURL } from 'node:url';
 import { spawnSync } from 'node:child_process';
 import {
   CLI, PLAN_LANES, CODE_REVIEW_LANES, usage, parseArgs, debateHome, probeWritable, findScript, skillRoots, VENDOR_SKILLS_DIR,
-  loadLaneConfig, relaySupportsReadOnly, sleepMs,
+  loadLaneConfig, sleepMs, skillVersion,
 } from './lib/common.mjs';
+import { resolveReviewOverride } from './lib/recovery.mjs';
 
 const HELP = `debate.mjs setup — configure reviewer lanes and host hooks, then check the install
 
@@ -292,9 +293,42 @@ function hooksCommand(flags, ask = null) {
 
 // ---------- doctor ----------
 
-function doctorCommand(flags) {
+/** Check the effective reviewers without writing settings or launching a reviewer. */
+export async function reviewerReadiness(cwd, { globalConfig, seats = AGENTS } = {}) {
+  let config;
+  try {
+    config = loadLaneConfig(cwd);
+    if (globalConfig !== undefined) {
+      const api = await delegateConfig();
+      const parsed = api.parseConfigDocument(JSON.stringify(globalConfig), 'proposed reviewer settings');
+      if (!parsed.ok) throw new Error(parsed.error);
+      config.lanes = {
+        ...Object.fromEntries(Object.entries(parsed.document.lanes).map(([name, entry]) => [name, { ...entry, source: 'global' }])),
+        ...Object.fromEntries(Object.entries(config.lanes).filter(([, entry]) => entry.source === 'project')),
+      };
+    }
+  } catch (error) {
+    return { ok: false, lanes: {}, checks: [{ lane: 'configuration', ok: false, error: error.message }] };
+  }
+  const names = new Set([
+    ...seats.map(seat => Object.hasOwn(config.lanes, `${PLAN_LANES.main}-${seat}`) ? `${PLAN_LANES.main}-${seat}` : PLAN_LANES.main),
+    PLAN_LANES.debate, ...CODE_REVIEW_LANES,
+  ]);
+  const checks = [...names].map(lane => {
+    const entry = config.lanes[lane];
+    try {
+      resolveReviewOverride(cwd, lane, { globalOnly: CODE_REVIEW_LANES.includes(lane), config });
+      if (!onPath(entry.implementer)) throw new Error(`reviewer lane ${lane}: ${entry.implementer} is not on PATH; install it or choose another reviewer`);
+      return { lane, entry, ok: true };
+    } catch (error) { return { lane, entry, ok: false, error: error.message }; }
+  });
+  return { ok: checks.every(check => check.ok), lanes: config.lanes, checks };
+}
+
+async function doctorCommand(flags) {
   const rows = [];
   const add = (level, what, detail) => rows.push({ level, what, detail });
+  add('ok', 'cross-debate', skillVersion());
   const major = Number(process.versions.node.split('.')[0]);
   add(major >= 18 ? 'ok' : 'fail', 'node', `${process.versions.node}${major >= 18 ? '' : ' (need 18+)'}`);
   const gitv = spawnSync('git', ['--version'], { encoding: 'utf8' });
@@ -311,16 +345,10 @@ function doctorCommand(flags) {
   }
   const available = REVIEWER_CLIS.filter(onPath);
   add(available.length >= 2 ? 'ok' : available.length ? 'warn' : 'fail', 'reviewer CLIs', available.join(', ') || 'none on PATH');
-  let lanes = {};
-  try { lanes = loadLaneConfig(path.resolve(flags.cwd || process.cwd())).lanes; } catch (e) { add('fail', 'lane config', e.message); }
-  for (const lane of [PLAN_LANES.main, PLAN_LANES.debate, ...CODE_REVIEW_LANES, ...available.map(s => `${PLAN_LANES.main}-${s}`)]) {
-    const entry = lanes[lane];
-    const optional = lane.startsWith(`${PLAN_LANES.main}-`);
-    if (!entry) { add(optional ? 'ok' : 'fail', `lane ${lane}`, optional ? 'not set (uses plan-main)' : `missing; run node ${JSON.stringify(invokedCli())} setup init in your own terminal (or setup lanes)`); continue; }
-    try {
-      const readOnly = relaySupportsReadOnly(findScript(`${entry.implementer}-delegate`, 'relay.mjs'));
-      add(readOnly ? 'ok' : 'fail', `lane ${lane}`, `${entry.implementer}${entry.model ? ` ${entry.model}` : ''} (${entry.source})${readOnly ? '' : ': relay lacks --read-only'}`);
-    } catch (e) { add('fail', `lane ${lane}`, e.message); }
+  const { lanes, checks } = await reviewerReadiness(path.resolve(flags.cwd || process.cwd()));
+  for (const { lane, entry, ok, error } of checks) {
+    const binding = entry ? `${entry.implementer}${entry.model ? ` ${entry.model}` : ''} (${entry.source})` : '';
+    add(ok ? 'ok' : 'fail', `lane ${lane}`, ok ? binding : [binding, error].filter(Boolean).join(': '));
   }
   for (const line of seatPairs(lanes, available)) add(line.includes('(secondary') ? 'warn' : 'ok', 'plan pairing', line);
   const writable = probeWritable(debateHome());

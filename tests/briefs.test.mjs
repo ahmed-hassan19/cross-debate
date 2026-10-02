@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
-import { buildBrief } from '../skills/debate/scripts/lib/briefs.mjs';
+import { buildBrief } from '../skills/cross-debate/scripts/lib/briefs.mjs';
 
 const input = {
   BASE: 'base-ref', HEAD: 'head-sha', PR_TITLE: 'title sentinel',
@@ -37,8 +37,8 @@ test('role input contracts reject missing required arguments', () => {
 });
 
 test('packaged templates resolve inside the skill directory: the plan brief and the review schema and prompts', async () => {
-  const { TEMPLATE_PATH } = await import('../skills/debate/scripts/plan.mjs');
-  const skill = new URL('../skills/debate/', import.meta.url);
+  const { TEMPLATE_PATH } = await import('../skills/cross-debate/scripts/plan.mjs');
+  const skill = new URL('../skills/cross-debate/', import.meta.url);
   assert.equal(TEMPLATE_PATH, fs.realpathSync(new URL('assets/review-brief.md', skill)));
   assert.ok(fs.existsSync(new URL('references/schema.md', skill)));
   for (const role of ['main', 'debate', 'final']) assert.ok(buildBrief(role, input).length > 0);

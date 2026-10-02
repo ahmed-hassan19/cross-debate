@@ -116,8 +116,7 @@ export const REVIEW_TOOLING = {
 export function reviewTooling(implementer) {
   return REVIEW_TOOLING[implementer] ?? 'the read-only tools your relay provides: read and search files only; do not request edit or execution permissions';
 }
-export function resolveReviewOverride(cwd, laneName, { globalOnly = false } = {}) {
-  const config = loadLaneConfig(cwd);
+export function resolveReviewOverride(cwd, laneName, { globalOnly = false, config = loadLaneConfig(cwd) } = {}) {
   const entry = config.lanes[laneName];
   if (!entry) throw usage(`reviewer lane ${laneName} is not configured`);
   if (globalOnly && entry.source !== 'global') throw usage(`reviewer lane ${laneName} must use a global binding`);

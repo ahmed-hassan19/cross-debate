@@ -53,7 +53,7 @@ reorder them or add a `##` heading above section 3.
 }
 ```
 
-- Every `F*` id gets exactly one verdict. A missing id counts as `confirm` with reason "no objection".
+- Every `F*` id gets exactly one explicit verdict. A missing verdict fails the review; silence never counts as confirmation.
 - `downgrade` means the defect is real but severity or confidence was overstated.
 - `refute` must carry evidence. A bare "I disagree" is recorded but weighted as `downgrade`.
 - `new_findings` is a gap sweep, not a second review. Blocking only, with a named trigger. Entries

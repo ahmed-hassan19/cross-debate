@@ -20,4 +20,18 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: ${{ matrix.node }}
-      - run: node --test tests/*.test.mjs
+      - run: node --test tests/hosts.test.mjs tests/workflow.test.mjs tests/briefs.test.mjs tests/readiness.test.mjs
+  installer:
+    strategy:
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci --ignore-scripts
+      - run: npm run test:installer
+      - run: node --test tests/package.test.mjs

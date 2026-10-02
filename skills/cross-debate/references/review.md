@@ -13,11 +13,11 @@ review work without repository enrollment; this command does not enroll reposito
 
 ## Run it
 
-`<debate-dir>` is defined in the skill's SKILL.md.
+`<cross-debate-dir>` is defined in the skill's SKILL.md.
 
 ```bash
-node "<debate-dir>/scripts/debate.mjs" review --local [--base <ref>]
-node "<debate-dir>/scripts/debate.mjs" review <pr-url | number> [--dry-run]
+node "<cross-debate-dir>/scripts/debate.mjs" review --local [--base <ref>]
+node "<cross-debate-dir>/scripts/debate.mjs" review <pr-url | number> [--dry-run]
 ```
 
 - If the user wants a review and there is no PR URL, run `--local` from the repo (or `--repo-dir`). Do not invent a

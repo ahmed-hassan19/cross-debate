@@ -29,6 +29,14 @@ export const SHA_RE = /^[0-9a-f]{40}$/;
 
 export const SKILL_DIR = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
 export const CLI = path.join(SKILL_DIR, 'scripts', 'debate.mjs');
+export function skillVersion(dir = SKILL_DIR) {
+  try { return fs.readFileSync(path.join(dir, 'VERSION'), 'utf8').trim(); } catch { /* Manual checkout. */ }
+  try {
+    const pkg = JSON.parse(fs.readFileSync(path.resolve(dir, '..', '..', 'package.json'), 'utf8'));
+    if (pkg.name === 'cross-debate') return pkg.version;
+  } catch { /* Standalone manual installation. */ }
+  return 'unknown (manual install)';
+}
 /** A copy-pasteable command line for the single entrypoint. */
 export function cliCommand(args) { return `node ${JSON.stringify(CLI)} ${args}`; }
 
@@ -285,11 +293,13 @@ export function changeRepositoryScope(cwd, enabled, home = debateHome()) {
   const root = initial.identity.worktreeRoot;
   return withRepositoryScopeLock(root, () => {
     const roots = worktreeRoots(root);
-    const identities = roots.map(p => {
-      const id = repoIdentity(p);
-      if (!id) throw usage(`cannot inspect linked worktree ${p}; repair or prune the stale entry explicitly before changing scope`);
-      return id;
-    }).sort((a, b) => a.repoKey.localeCompare(b.repoKey));
+    // Never skip an uninspectable worktree: a moved one may be repaired later with approvals this transition could not revoke.
+    const unreadable = roots.filter(p => !repoIdentity(p));
+    if (unreadable.length) {
+      const prune = unreadable.some(p => !fs.existsSync(p)) ? 'if deleted, run `git worktree prune -v` (branch any detached HEAD you need first); ' : '';
+      throw usage(`cannot inspect ${unreadable.length} linked worktree(s), see \`git worktree list\`; ${prune}if moved, run \`git worktree repair <new-path>\``);
+    }
+    const identities = roots.map(p => repoIdentity(p)).sort((a, b) => a.repoKey.localeCompare(b.repoKey));
     // Acquire all ledger locks before validation: a partial check must not change config or abandon a candidate.
     const locked = (i, fn) => i === identities.length ? fn() : withLock(`${ledgerPath(home, identities[i].repoKey)}.lock`, () => locked(i + 1, fn));
     return locked(0, () => {

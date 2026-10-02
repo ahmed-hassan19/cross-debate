@@ -10,7 +10,7 @@ import { fileURLToPath } from 'node:url';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const FIX = path.join(HERE, 'fixtures');
-const SKILL = path.resolve(HERE, '..', 'skills', 'debate');
+const SKILL = path.resolve(HERE, '..', 'skills', 'cross-debate');
 const SCRIPTS = path.join(SKILL, 'scripts');
 const CLI = path.join(SCRIPTS, 'debate.mjs');
 const SCRATCH = fs.mkdtempSync(path.join(process.env.DEBATE_TEST_SCRATCH || os.tmpdir(), 'debate-test-'));
@@ -262,7 +262,7 @@ test('scope transitions support live worktrees backed by bare repositories but s
   const other = path.join(SCRATCH, 'scope-bare-other');
   gitc(worktree, 'worktree', 'add', '--quiet', '-b', 'other', other);
   fs.renameSync(other, `${other}-moved`);
-  assert.throws(() => common.changeRepositoryScope(worktree, false, HOME), /cannot inspect linked worktree/);
+  assert.throws(() => common.changeRepositoryScope(worktree, false, HOME), /cannot inspect 1 linked worktree\(s\).*worktree prune -v.*worktree repair <new-path>/);
   assert.equal(common.repositoryScope(worktree).enabled, true);
 });
 
@@ -282,8 +282,12 @@ test('scope transitions revoke approvals across worktrees, refuse active or unch
   assert.equal(common.repositoryScope(repo).enabled, true);
   common.updateLedger(HOME, ids[1], l => { l.active = null; return l; });
   fs.renameSync(linked, `${linked}-moved`);
-  assert.throws(() => common.changeRepositoryScope(repo, false, HOME), /cannot inspect/);
+  const gone = path.join(SCRATCH, 'transition-gone');
+  gitc(repo, 'worktree', 'add', '-q', '-b', 'gone', gone);
+  fs.rmSync(gone, { recursive: true });
+  assert.throws(() => common.changeRepositoryScope(repo, false, HOME), /cannot inspect 2 linked worktree\(s\).*git worktree prune -v/);
   fs.renameSync(`${linked}-moved`, linked);
+  gitc(repo, 'worktree', 'prune');
   common.changeRepositoryScope(repo, false, HOME);
   const enabled = makeRepo();
   const decide = (command, cwd = enabled) => common.gitGateDecision({ command, cwd, home: HOME });
@@ -2355,4 +2359,42 @@ test('begin clears a ledger entry whose run was never saved instead of reporting
   const ledger = common.loadLedger(HOME, common.repoIdentity(repo).repoKey);
   assert.equal(ledger.active.runId, begun.runId);
   assert.ok(ledger.audit.some(e => e.type === 'orphan_candidate_cleared' && e.runId === orphan));
+});
+
+test('authorized waiver abandons an unchanged base without a receipt, but refuses dirty or staged work', () => {
+  const repo = makeRepo();
+  const sid = 'sess-abandon';
+  hook('claude', 'SessionStart', hookPayload(sid, repo));
+  const runId = cli('code', ['begin', '--seat', 'claude', '--session', sid, '--cwd', repo]).json.runId;
+  const ledger = () => common.loadLedger(HOME, common.repoIdentity(repo).repoKey);
+  const baseline = ledger().baselines;
+  const head = gitc(repo, 'rev-parse', 'HEAD');
+  const waive = reason => cli('code', ['waive', '--run', runId, '--reason', reason]);
+  const reason = 'user approved: abandon this unchanged candidate';
+  assert.equal(waive('abandon').status, 2);
+  fs.writeFileSync(path.join(repo, 'untracked.txt'), 'keep me');
+  assert.match(waive(reason).json.error.message, /not clean/);
+  fs.unlinkSync(path.join(repo, 'untracked.txt'));
+  fs.appendFileSync(path.join(repo, 'app.py'), '# changed\n');
+  assert.match(waive(reason).json.error.message, /not clean/);
+  gitc(repo, 'add', 'app.py');
+  assert.match(waive(reason).json.error.message, /not clean/);
+  assert.equal(ledger().active.runId, runId);
+  gitc(repo, 'restore', '--staged', '--worktree', 'app.py');
+  const result = waive(reason);
+  assert.equal(result.status, 0, result.stderr);
+  assert.equal(result.json.outcome, 'abandoned');
+  assert.equal(result.json.candidateCommit, null);
+  assert.equal(result.json.baselineAdvanced, false);
+  assert.equal(ledger().active, null);
+  assert.deepEqual(ledger().receipts, []);
+  assert.deepEqual(ledger().approvals, []);
+  assert.deepEqual(ledger().baselines, baseline);
+  assert.equal(gitc(repo, 'rev-parse', 'HEAD'), head);
+  assert.ok(ledger().audit.some(e => e.type === 'candidate_abandoned' && e.runId === runId));
+  assert.equal(cli('code', ['approve-push', '--run', runId]).status, 2);
+  assert.equal(cli('code', ['finish', '--run', runId]).json.outcome, 'abandoned');
+  assert.deepEqual(ledger().receipts, []);
+  assert.equal(cli('scope', ['disable', '--cwd', repo]).status, 0);
+  assert.equal(cli('code', ['begin', '--seat', 'codex', '--session', 'next-task', '--cwd', repo]).json.ok, true);
 });
