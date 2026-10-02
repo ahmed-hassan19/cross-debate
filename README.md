@@ -71,12 +71,19 @@ checkout on purpose.
 
 ## Setup
 
-Run these in **your own terminal**, through the same catalog path your agent sees (for example
-`~/.claude/skills/debate`): permission allowlists match paths literally.
+Run setup in **your own terminal**, through the same catalog path your agent sees (for example
+`~/.claude/skills/debate`): permission allowlists match paths literally. Once after installing:
 
 ```sh
 D=~/.claude/skills/debate/scripts/debate.mjs   # adjust to your install path
+node "$D" setup init
+```
 
+`init` asks, step by step, which CLI, model and effort each reviewer lane uses (Enter keeps the shown default),
+whether to install the hooks for each agent it finds, and whether to install the optional skills below that are
+missing; then it runs `doctor`. The individual commands remain for scripting:
+
+```sh
 node "$D" setup lanes                  # proposes missing reviewer lanes; add --write to apply
 node "$D" setup hooks --agent claude   # or codex | cursor | opencode; add --write to merge
 node "$D" setup doctor                 # checks node, git, gh, CLIs, lanes, relays, DEBATE_HOME, hooks
@@ -126,6 +133,8 @@ On Cursor and OpenCode, ask the agent to use the skill; it runs the plan and cod
 
 ## Optional integrations
 
+`setup init` detects both and offers to install the missing ones with their official install commands.
+
 - [ponytail](https://github.com/DietrichGebert/ponytail): if installed, the code workflow runs one
   over-engineering review before project checks on substantial changes.
 - babysit-pr from [review-skills](https://github.com/amElnagdy/review-skills): if installed, it can take over the
@@ -157,13 +166,14 @@ and 22.
 
 ### Updating the bundled delegate-skills
 
-The six files under `skills/debate/vendor/delegate-skills/` are byte-identical copies of one upstream commit. To move
+The seven files under `skills/debate/vendor/delegate-skills/` are byte-identical copies of one upstream commit. To move
 to a newer commit (for reviewer CLI changes, or lanes for implementers the bundled validator does not know yet):
 
 ```sh
 git clone https://github.com/amElnagdy/delegate-skills.git /tmp/ds && git -C /tmp/ds checkout <commit>
 for f in claude-delegate/scripts/relay.mjs codex-delegate/scripts/relay.mjs opencode-delegate/scripts/relay.mjs \
-         delegate-setup/scripts/config.mjs delegate-setup/scripts/lane.mjs delegate-setup/scripts/implementers.mjs; do
+         delegate-setup/scripts/config.mjs delegate-setup/scripts/lane.mjs delegate-setup/scripts/implementers.mjs \
+         delegate-setup/scripts/discover.mjs; do
   cp "/tmp/ds/skills/$f" "skills/debate/vendor/delegate-skills/$f"
 done
 node --test tests/*.test.mjs

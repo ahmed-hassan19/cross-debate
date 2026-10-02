@@ -10,7 +10,7 @@ This skill bundles and adapts MIT-licensed code. Each upstream license is reprod
   - `claude-delegate/scripts/relay.mjs`
   - `codex-delegate/scripts/relay.mjs`
   - `opencode-delegate/scripts/relay.mjs`
-  - `delegate-setup/scripts/config.mjs`, `lane.mjs`, `implementers.mjs`
+  - `delegate-setup/scripts/config.mjs`, `lane.mjs`, `implementers.mjs`, `discover.mjs`
 - Always used in preference to any installed delegate-skills copy (override with `DELEGATE_SKILLS_DIR`).
 - `scripts/lib/common.mjs` (`findScript`, `extractJson`) and `scripts/lib/dispatch.mjs` adapt its relay lookup.
 

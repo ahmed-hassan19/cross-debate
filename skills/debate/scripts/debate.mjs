@@ -8,7 +8,7 @@ Usage:
   debate.mjs plan <command> ...       cross-review a final plan (plan --help)
   debate.mjs code <command> ...       review a local candidate commit, approve pushes (code --help)
   debate.mjs review <pr|--local> ...  two-model debate review of a GitHub PR or working tree (review --help)
-  debate.mjs setup lanes|hooks|doctor configure reviewer lanes and host hooks, check the install (setup --help)
+  debate.mjs setup init|lanes|hooks|doctor configure reviewer lanes and host hooks, check the install (setup --help)
   debate.mjs scope enable|disable|status --cwd <dir>
   debate.mjs stats [--kind plan|code] [--seat ${SEATS.join('|')}] [--since 30d] [--json]
   debate.mjs hook <agent> <event>     host hook dispatcher (JSON payload on stdin)

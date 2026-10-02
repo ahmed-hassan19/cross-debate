@@ -37,7 +37,7 @@ allowlists match. Do not assume a username, home directory, or skill installatio
 | Implementation is done, or a push or merged-branch delete is requested | [references/code.md](references/code.md) |
 | The user asks for a review of a GitHub PR or the working tree | [references/review.md](references/review.md) |
 | Scope, dirty artifacts, reviewer failure and recovery, hooks, hosts | [references/operations.md](references/operations.md) |
-| Lanes missing, hooks absent, or install problems | run `setup doctor`, then `setup lanes` / `setup hooks --agent <host>` |
+| Lanes missing, hooks absent, or install problems | run `setup doctor`; if lanes are missing, tell the user to run `node "<debate-dir>/scripts/debate.mjs" setup init` in their own terminal |
 
 A hook reminder or denial names the workflow to follow; obey it rather than working around the gate.
 
@@ -51,5 +51,6 @@ in the foreground with a long command timeout. Never start a duplicate review wh
 
 ## Setup commands
 
-`setup lanes` and `setup hooks` print their changes; `--write` edits settings only after the user confirms in
-their own terminal. Never run `--write` for the user and never edit agent settings files yourself.
+`setup init` is the user's interactive first-run wizard; never run it for them. `setup lanes` and `setup hooks`
+print their changes; `--write` edits settings only after the user confirms in their own terminal. Never run
+`--write` for the user and never edit agent settings files yourself.

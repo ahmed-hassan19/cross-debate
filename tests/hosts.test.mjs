@@ -492,3 +492,120 @@ test('plan pairing compares models, so two lanes on one CLI with different model
   assert.equal(setup.seatPairs(lanes, ['codex'])[0], 'seat codex: plan reviewers claude then claude');
   assert.match(setup.seatPairs({ ...lanes, 'plan-debate': { implementer: 'claude', model: 'model-a' } }, ['codex'])[0], /repeats the primary reviewer/);
 });
+
+// ---------- setup init ----------
+
+/** An ask that answers from per-question queues (first matching rule with answers left), else Enter. */
+function scripted(rules = []) {
+  const asked = [];
+  const ask = (question) => {
+    asked.push(question);
+    for (const [pattern, answers] of rules) if (pattern.test(question) && answers.length) return answers.shift();
+    return '';
+  };
+  ask.asked = asked;
+  return ask;
+}
+/** Run the wizard against a fresh HOME and config dir with the given CLIs on PATH; stdout is captured. */
+async function init(clis, ask, { runner = () => 0, home } = {}) {
+  const saved = { PATH: process.env.PATH, HOME: process.env.HOME, XDG_CONFIG_HOME: process.env.XDG_CONFIG_HOME };
+  const scratch = fs.mkdtempSync(path.join(SCRATCH, 'init-'));
+  process.env.HOME = home ?? path.join(scratch, 'home');
+  fs.mkdirSync(process.env.HOME, { recursive: true });
+  process.env.XDG_CONFIG_HOME = path.join(scratch, 'xdg');
+  process.env.PATH = binWith(clis);
+  const write = process.stdout.write;
+  let text = '';
+  process.stdout.write = (chunk) => { text += chunk; return true; };
+  try {
+    await setup.runInit({ ask, runner });
+  } finally {
+    process.stdout.write = write;
+    Object.assign(process.env, saved);
+  }
+  const file = path.join(scratch, 'xdg', 'delegate-skills', 'config.json');
+  return { text, lanes: fs.existsSync(file) ? JSON.parse(fs.readFileSync(file, 'utf8')).lanes : null };
+}
+
+test('setup init: Enter on every prompt writes exactly the proposed lanes, and n at the confirm writes nothing', async () => {
+  const accepted = await init(['claude', 'codex'], scripted([[/Write this change/, ['y']]]));
+  assert.deepEqual(accepted.lanes, setup.proposeLanes(['claude', 'codex'], {}).lanes);
+  assert.match(accepted.text, /seat claude: plan reviewers codex then claude/);
+  const declined = await init(['claude', 'codex'], scripted([[/Write this change/, ['n']]]));
+  assert.equal(declined.lanes, null);
+  assert.match(declined.text, /not written/);
+});
+
+test('setup init binds the chosen CLI, model and effort, and re-prompts an invalid effort', async () => {
+  const ask = scripted([
+    [/^review-main CLI/, ['codex']], [/^review-main model/, ['gpt-5.5']], [/^review-main effort/, ['high']],
+    [/^plan-main effort/, ['bogus', 'xhigh']], [/per host/, ['n']], [/Write this change/, ['y']],
+  ]);
+  const { lanes } = await init(['claude', 'codex'], ask);
+  assert.deepEqual(lanes['review-main'], { implementer: 'codex', model: 'gpt-5.5', effort: 'high' });
+  assert.deepEqual(lanes['plan-main'], { implementer: 'claude', effort: 'xhigh' });
+  assert.equal(ask.asked.filter(q => /^plan-main effort/.test(q)).length, 2);
+  assert.equal(lanes['plan-main-claude'], undefined);
+});
+
+test('setup init re-prompts an opencode lane until it has a provider/model', async () => {
+  const ask = scripted([[/^review-debate model/, ['', 'default', 'prov/m']], [/per host/, ['n']], [/Write this change/, ['y']]]);
+  const { lanes } = await init(['claude', 'opencode'], ask);
+  assert.deepEqual(lanes['review-debate'], { implementer: 'opencode', model: 'prov/m' });
+  assert.equal(ask.asked.filter(q => /^review-debate model/.test(q)).length, 3);
+});
+
+test('setup init installs only missing optional skills with the official argv, and a failed command does not stop it', async () => {
+  const calls = [];
+  const runner = (argv) => { calls.push(argv); return calls.length === 1 ? 1 : 0; };
+  const { text } = await init(['claude', 'codex'], scripted([[/Configure reviewer lanes/, ['n']], [/Install (ponytail|babysit-pr)/, ['y', 'y']]]), { runner });
+  assert.deepEqual(calls, [
+    ['claude', 'plugin', 'marketplace', 'add', 'DietrichGebert/ponytail'],
+    ['codex', 'plugin', 'marketplace', 'add', 'DietrichGebert/ponytail'],
+    ['codex', 'plugin', 'add', 'ponytail@ponytail'],
+    ['npx', 'skills', 'add', 'amElnagdy/review-skills', '--skill', 'babysit-pr', '-g'],
+  ]);
+  assert.match(text, /failed: claude plugin marketplace add DietrichGebert\/ponytail/);
+  assert.match(text, /trust the two ponytail hooks/);
+  assert.match(text, /Install check:/);
+
+  const home = path.join(SCRATCH, 'init-installed-home');
+  fs.mkdirSync(path.join(home, '.agents', 'skills', 'babysit-pr'), { recursive: true });
+  fs.writeFileSync(path.join(home, '.agents', 'skills', 'babysit-pr', 'SKILL.md'), '');
+  fs.mkdirSync(path.join(home, '.codex', 'plugins', 'cache', 'ponytail'), { recursive: true });
+  const ask = scripted([[/Configure reviewer lanes/, ['n']]]);
+  const none = [];
+  await init(['claude', 'codex'], ask, { home, runner: (argv) => { none.push(argv); return 0; } });
+  assert.deepEqual(none, []);
+  assert.equal(ask.asked.some(q => /^Install (ponytail|babysit-pr)/.test(q)), false);
+});
+
+test('detectOptional reads plugin manifests, the Codex plugin cache and skill directories', () => {
+  const home = fs.mkdtempSync(path.join(SCRATCH, 'optional-'));
+  assert.deepEqual(setup.detectOptional({ HOME: home }), { ponytail: null, 'babysit-pr': null });
+  const manifest = path.join(home, '.claude', 'plugins', 'installed_plugins.json');
+  fs.mkdirSync(path.dirname(manifest), { recursive: true });
+  fs.writeFileSync(manifest, JSON.stringify({ version: 2, plugins: { 'ponytail@ponytail': [] } }));
+  assert.equal(setup.detectOptional({ HOME: home }).ponytail, manifest);
+  const codex = path.join(home, 'codex');
+  fs.mkdirSync(path.join(codex, 'plugins', 'cache', 'ponytail'), { recursive: true });
+  assert.equal(setup.detectOptional({ HOME: path.join(home, 'elsewhere'), CODEX_HOME: codex }).ponytail, path.join(codex, 'plugins', 'cache', 'ponytail'));
+  const skill = path.join(home, '.claude', 'skills', 'babysit-pr');
+  fs.mkdirSync(skill, { recursive: true });
+  fs.writeFileSync(path.join(skill, 'SKILL.md'), '');
+  assert.equal(setup.detectOptional({ HOME: home })['babysit-pr'], skill);
+});
+
+test('setup init refuses without a terminal and writes nothing; a missing lane points to setup init', async () => {
+  const xdg = path.join(SCRATCH, 'init-notty-xdg');
+  const r = run(['setup', 'init'], { env: { XDG_CONFIG_HOME: xdg, PATH: binWith(['claude', 'codex']) } });
+  assert.notEqual(r.status, 0);
+  assert.match(r.stdout + r.stderr, /interactive terminal/);
+  assert.equal(fs.existsSync(xdg), false);
+  const { resolveRole } = await import(path.join(SCRIPTS, 'lib', 'dispatch.mjs'));
+  const saved = process.env.XDG_CONFIG_HOME;
+  process.env.XDG_CONFIG_HOME = path.join(SCRATCH, 'init-empty-xdg');
+  try {
+    assert.throws(() => resolveRole('main', { lane: 'review-main', cwd: SCRATCH }), /setup init/);
+  } finally { process.env.XDG_CONFIG_HOME = saved; }
+});

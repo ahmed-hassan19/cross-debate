@@ -1,5 +1,6 @@
-// setup.mjs — `debate.mjs setup`: propose missing reviewer lanes, print or merge host hook entries, and check the install.
-// Nothing is written without --write, an interactive terminal and an explicit y; an agent cannot edit its own settings.
+// setup.mjs — `debate.mjs setup`: a first-run wizard, propose missing reviewer lanes, print or merge host hook entries,
+// and check the install. Nothing is written without an interactive terminal and an explicit y; an agent cannot edit
+// its own settings.
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -7,16 +8,19 @@ import { pathToFileURL } from 'node:url';
 import { spawnSync } from 'node:child_process';
 import {
   CLI, PLAN_LANES, CODE_REVIEW_LANES, usage, parseArgs, debateHome, probeWritable, findScript, skillRoots, VENDOR_SKILLS_DIR,
-  loadLaneConfig, relaySupportsReadOnly,
+  loadLaneConfig, relaySupportsReadOnly, sleepMs,
 } from './lib/common.mjs';
 
 const HELP = `debate.mjs setup — configure reviewer lanes and host hooks, then check the install
 
 Usage:
+  setup init
   setup lanes [--opencode-model <provider/model>] [--write]
   setup hooks --agent claude|codex|cursor|opencode [--write]
   setup doctor [--cwd <dir>]
 
+init walks you through reviewer lanes (CLI, model, effort), host hooks and the optional skills (ponytail,
+babysit-pr), then runs doctor. Run it once after installing, in your own terminal.
 lanes proposes only lanes missing from the global delegate-skills config (plan-main[-<seat>], plan-debate,
 review-main, review-debate) for the reviewer CLIs on PATH. hooks prints the exact entries for one agent.
 --write shows the change and asks y/N; it needs an interactive terminal and keeps a *.debate-bak backup.
@@ -47,15 +51,59 @@ function lineDiff(before, after) {
   const next = new Set(after.split('\n'));
   return [...before.split('\n').filter(l => !next.has(l)).map(l => `- ${l}`), ...after.split('\n').filter(l => !old.has(l)).map(l => `+ ${l}`)].join('\n');
 }
-/** Show the change, require a human y, back up, then write. */
-function confirmAndWrite(file, before, after, write = (f, text) => fs.writeFileSync(f, text)) {
-  if (!process.stdin.isTTY || !process.stdout.isTTY) throw usage('--write needs an interactive terminal; run this command yourself (in Claude Code: type ! followed by the command)');
+function requireTty(what = '--write') {
+  if (!process.stdin.isTTY || !process.stdout.isTTY) throw usage(`${what} needs an interactive terminal; run this command yourself (in Claude Code: type ! followed by the command)`);
+}
+
+// ---------- prompts ----------
+
+let pending = '';
+/** One line from stdin, synchronously (no readline, so it never competes with readSync); null at end of input. */
+function readLine() {
+  while (!pending.includes('\n')) {
+    const buf = Buffer.alloc(256);
+    let n = 0;
+    try { n = fs.readSync(0, buf, 0, buf.length, null); } catch (e) { if (e.code === 'EAGAIN') { sleepMs(20); continue; } n = 0; }
+    if (!n) { const rest = pending; pending = ''; return rest || null; }
+    pending += buf.toString('utf8', 0, n);
+  }
+  const i = pending.indexOf('\n');
+  const line = pending.slice(0, i);
+  pending = pending.slice(i + 1);
+  return line.replace(/\r$/, '');
+}
+/** The production ask: print the question, numbered choices and the default, then read one line. */
+function terminalAsk(question, { choices = [], def = '' } = {}) {
+  const list = choices.map((c, i) => `  ${i + 1}) ${c}\n`).join('');
+  process.stdout.write(`${question}\n${list}${def ? `[${def}] ` : ''}> `);
+  return readLine();
+}
+/** Ask until the answer passes: a choice number, a listed choice, free text when allowed, or Enter for the default. */
+function pick(ask, question, { choices = [], def = '', free = false, check = () => null } = {}) {
+  for (;;) {
+    const raw = ask(question, { choices, def });
+    if (raw === null || raw === undefined) throw usage('input ended; stopped before writing anything further');
+    let answer = raw.trim() || def;
+    if (/^\d+$/.test(answer) && choices[Number(answer) - 1]) answer = choices[Number(answer) - 1];
+    const error = !answer ? 'an answer is required'
+      : !free && !choices.includes(answer) ? `choose one of: ${choices.join(', ')}`
+      : check(answer);
+    if (!error) return answer;
+    process.stdout.write(`  ${error}\n`);
+  }
+}
+function confirm(ask, question, def = false) {
+  const raw = ask(`${question} [${def ? 'Y/n' : 'y/N'}]`);
+  if (raw === null || raw === undefined) throw usage('input ended; stopped before writing anything further');
+  return raw.trim() ? /^y(es)?$/i.test(raw.trim()) : def;
+}
+
+/** Show the change, require a human y, back up, then write. Without an injected ask it needs a terminal. */
+function confirmAndWrite(file, before, after, write = (f, text) => fs.writeFileSync(f, text), ask = null) {
+  if (!ask) { requireTty(); ask = terminalAsk; }
   if (before === after) { process.stdout.write(`${file}: already up to date\n`); return false; }
-  process.stdout.write(`\n${file}\n${lineDiff(before, after)}\n\nWrite this change? [y/N] `);
-  const buf = Buffer.alloc(16);
-  let answer = '';
-  try { answer = buf.toString('utf8', 0, fs.readSync(0, buf, 0, buf.length, null)).trim(); } catch { answer = ''; }
-  if (!/^y(es)?$/i.test(answer)) { process.stdout.write('not written\n'); return false; }
+  process.stdout.write(`\n${file}\n${lineDiff(before, after)}\n\n`);
+  if (!confirm(ask, 'Write this change?')) { process.stdout.write('not written\n'); return false; }
   fs.mkdirSync(path.dirname(file), { recursive: true });
   if (fs.existsSync(file)) fs.copyFileSync(file, `${file}.debate-bak`);
   write(file, after);
@@ -204,7 +252,7 @@ export const DebateGitGate = async ({ directory }) => ({
 `;
 }
 
-function hooksCommand(flags) {
+function hooksCommand(flags, ask = null) {
   if (!AGENTS.includes(flags.agent)) throw usage(`--agent must be one of ${AGENTS.join('|')}`);
   const agent = flags.agent;
   const cli = invokedCli();
@@ -233,7 +281,7 @@ function hooksCommand(flags) {
     out.write(`\nAdd to ${path.join(codexHome(), 'config.toml')} yourself (setup never edits TOML):\n[features]\nhooks = true\n\n[sandbox_workspace_write]\nwritable_roots = [${JSON.stringify(debateHome())}]\n`);
     out.write('Codex asks you to trust new or changed hook definitions on the next interactive start; review and accept them there.\n');
   }
-  if (flags.write) confirmAndWrite(entries.file, before, after);
+  if (flags.write) confirmAndWrite(entries.file, before, after, undefined, ask);
   else out.write('\ndry run: add --write in your own terminal to merge, then restart the agent\n');
   return 0;
 }
@@ -264,7 +312,7 @@ function doctorCommand(flags) {
   for (const lane of [PLAN_LANES.main, PLAN_LANES.debate, ...CODE_REVIEW_LANES, ...available.map(s => `${PLAN_LANES.main}-${s}`)]) {
     const entry = lanes[lane];
     const optional = lane.startsWith(`${PLAN_LANES.main}-`);
-    if (!entry) { add(optional ? 'ok' : 'fail', `lane ${lane}`, optional ? 'not set (uses plan-main)' : `missing; run ${JSON.stringify(invokedCli())} setup lanes`); continue; }
+    if (!entry) { add(optional ? 'ok' : 'fail', `lane ${lane}`, optional ? 'not set (uses plan-main)' : `missing; run node ${JSON.stringify(invokedCli())} setup init in your own terminal (or setup lanes)`); continue; }
     try {
       const readOnly = relaySupportsReadOnly(findScript(`${entry.implementer}-delegate`, 'relay.mjs'));
       add(readOnly ? 'ok' : 'fail', `lane ${lane}`, `${entry.implementer}${entry.model ? ` ${entry.model}` : ''} (${entry.source})${readOnly ? '' : ': relay lacks --read-only'}`);
@@ -285,10 +333,145 @@ function doctorCommand(flags) {
   return rows.some(r => r.level === 'fail') ? 1 : 0;
 }
 
+// ---------- init ----------
+
+const OPTIONAL_SKILLS = ['ponytail', 'babysit-pr'];
+
+/** Where each optional skill is installed, or null. Reads only plugin manifests and skill directories. */
+export function detectOptional(env = process.env) {
+  const home = env.HOME || os.homedir();
+  const claude = env.CLAUDE_CONFIG_DIR || path.join(home, '.claude');
+  const codex = env.CODEX_HOME || path.join(home, '.codex');
+  const skillDir = (name) => [path.join(home, '.agents', 'skills'), path.join(claude, 'skills'), path.join(codex, 'skills')]
+    .map(root => path.join(root, name)).find(dir => fs.existsSync(path.join(dir, 'SKILL.md'))) ?? null;
+  let claudePlugin = null;
+  try {
+    const manifest = path.join(claude, 'plugins', 'installed_plugins.json');
+    if (Object.keys(JSON.parse(fs.readFileSync(manifest, 'utf8')).plugins || {}).some(k => k.startsWith('ponytail@'))) claudePlugin = manifest;
+  } catch { claudePlugin = null; }
+  const codexCache = path.join(codex, 'plugins', 'cache', 'ponytail');
+  return {
+    ponytail: claudePlugin ?? (fs.existsSync(codexCache) ? codexCache : null) ?? skillDir('ponytail-review'),
+    'babysit-pr': skillDir('babysit-pr'),
+  };
+}
+
+/** Install commands per optional skill, for the hosts on PATH. Upstream READMEs: DietrichGebert/ponytail, amElnagdy/review-skills. */
+export function installCommands(skill, available) {
+  if (skill === 'babysit-pr') return [{ host: 'skills', argv: [['npx', 'skills', 'add', 'amElnagdy/review-skills', '--skill', 'babysit-pr', '-g']] }];
+  return [
+    ...(available.includes('claude') ? [{ host: 'Claude Code', argv: [['claude', 'plugin', 'marketplace', 'add', 'DietrichGebert/ponytail'], ['claude', 'plugin', 'install', 'ponytail@ponytail']] }] : []),
+    ...(available.includes('codex') ? [{ host: 'Codex', argv: [['codex', 'plugin', 'marketplace', 'add', 'DietrichGebert/ponytail'], ['codex', 'plugin', 'add', 'ponytail@ponytail']], note: 'run codex, open /hooks, and trust the two ponytail hooks' }] : []),
+  ];
+}
+
+/** A lane from the wizard's answers. The same CLI keeps the lane's other dials; a different CLI starts clean. */
+export function buildLane({ base = {}, implementer, model = 'default', dial = null, value = 'none' }) {
+  const lane = base.implementer === implementer ? { ...base } : { implementer };
+  if (model === 'default') delete lane.model; else lane.model = model;
+  if (dial) { if (value === 'none') delete lane[dial]; else lane[dial] = value; }
+  return lane;
+}
+
+/** Model ids per implementer from the bundled discover.mjs; any probe failure leaves the list empty. */
+function discoverModels() {
+  try {
+    const r = spawnSync(process.execPath, [findScript('delegate-setup', 'discover.mjs')], { encoding: 'utf8', timeout: 60_000 });
+    return Object.fromEntries(JSON.parse(r.stdout).discovered.map(d => [d.key, d.models?.values ?? []]));
+  } catch { return {}; }
+}
+
+async function fleetStep(ask, available, models) {
+  const config = await delegateConfig();
+  const impls = await import(pathToFileURL(findScript('delegate-setup', 'implementers.mjs')).href);
+  const efforts = { claude: impls.CLAUDE_EFFORT, agy: impls.AGY_EFFORT, copilot: impls.COPILOT_EFFORT, omp: impls.OMP_THINKING };
+  const file = config.globalConfigPath();
+  const current = config.readConfigFile(file)?.document ?? { version: 'delegate-fleet.v1', lanes: {} };
+  const proposal = proposeLanes(available, {});
+  const out = process.stdout;
+  out.write(`\nReviewer lanes (config ${file}). Enter keeps the value in brackets.\n`);
+  const names = [PLAN_LANES.main, PLAN_LANES.debate, ...CODE_REVIEW_LANES];
+  const seatLanes = available.map(s => `${PLAN_LANES.main}-${s}`);
+  if (available.length > 1 && confirm(ask, 'Different first plan reviewer per host?', true)) names.push(...seatLanes);
+  const checkLane = (name, lane) => {
+    const parsed = config.parseConfigDocument(JSON.stringify({ version: current.version, lanes: { [name]: lane } }), 'lane');
+    return parsed.ok ? null : parsed.error.replace(/^lane: /, '');
+  };
+  const chosen = {};
+  for (const name of names) {
+    const base = Object.hasOwn(current.lanes, name) ? current.lanes[name] : (proposal.lanes[name] ?? { implementer: proposal.templates[name]?.implementer ?? available[0] });
+    out.write('\n');
+    const implementer = pick(ask, `${name} CLI`, { choices: [...new Set([...available, base.implementer])], def: base.implementer });
+    const kept = implementer === base.implementer ? base : {};
+    const listed = (models[implementer] ?? []).slice(0, 40);
+    const model = pick(ask, `${name} model (number, name, or default)`, {
+      choices: [...listed, 'default'], def: kept.model ?? 'default', free: true,
+      check: m => checkLane(name, buildLane({ base: kept, implementer, model: m })),
+    });
+    const supports = impls.IMPLEMENTER_BY_KEY[implementer]?.supports ?? [];
+    const dial = supports.includes('effort') ? 'effort' : supports.includes('variant') ? 'variant' : null;
+    let value = 'none';
+    if (dial) {
+      const choices = [...(efforts[implementer] ?? []), 'none'];
+      value = pick(ask, `${name} ${dial}${efforts[implementer] ? '' : ' (free text, or none)'}`, {
+        choices, def: kept[dial] ?? 'none', free: !efforts[implementer],
+        check: v => checkLane(name, buildLane({ base: kept, implementer, model, dial, value: v })),
+      });
+    }
+    chosen[name] = buildLane({ base, implementer, model, dial, value });
+  }
+  const merged = { ...current, lanes: { ...current.lanes, ...chosen } };
+  const parsed = config.parseConfigDocument(JSON.stringify(merged), 'proposed config');
+  if (!parsed.ok) throw usage(parsed.error);
+  out.write('\n');
+  for (const w of proposal.warnings) out.write(`warning: ${w}\n`);
+  for (const line of seatPairs(merged.lanes, available)) out.write(`${line}\n`);
+  const before = fs.existsSync(file) ? fs.readFileSync(file, 'utf8') : '';
+  confirmAndWrite(file, before, `${JSON.stringify(parsed.document, null, 2)}\n`, (f) => config.writeAtomic(f, parsed.document), ask);
+}
+
+function optionalStep(ask, available, runner) {
+  const out = process.stdout;
+  const found = detectOptional();
+  out.write('\nOptional skills:\n');
+  for (const skill of OPTIONAL_SKILLS) out.write(`  ${skill}: ${found[skill] ? `installed (${found[skill]})` : 'missing'}\n`);
+  for (const skill of OPTIONAL_SKILLS.filter(s => !found[s])) {
+    const targets = installCommands(skill, available);
+    if (!targets.length) { out.write(`  ${skill}: needs claude or codex on PATH to install; skipped\n`); continue; }
+    if (!confirm(ask, `Install ${skill}?`)) continue;
+    for (const { host, argv, note } of targets) {
+      const failed = argv.find(cmd => { out.write(`$ ${cmd.join(' ')}\n`); return runner(cmd) !== 0; });
+      if (failed) out.write(`  failed: ${failed.join(' ')}; run it yourself later\n`);
+      else out.write(`  ${skill} installed for ${host}${note ? `; ${note}` : ''}\n`);
+    }
+  }
+}
+
+const defaultRunner = (argv) => spawnSync(argv[0], argv.slice(1), { stdio: 'inherit' }).status;
+
+/** The first-run wizard. ask and runner are injected so tests can script it; production needs a terminal. */
+export async function runInit({ ask = terminalAsk, runner = defaultRunner } = {}) {
+  const out = process.stdout;
+  const available = REVIEWER_CLIS.filter(onPath);
+  out.write(`debate setup. Reviewer CLIs on PATH: ${available.join(', ') || 'none'}\n`);
+  if (!available.length) out.write(`no reviewer CLI found (${REVIEWER_CLIS.join(', ')}); install one and rerun init to configure lanes\n`);
+  else if (confirm(ask, 'Configure reviewer lanes?', true)) await fleetStep(ask, available, discoverModels());
+  const homes = { claude: claudeHome(), codex: codexHome(), cursor: path.join(os.homedir(), '.cursor'), opencode: opencodeHome() };
+  for (const agent of AGENTS.filter(a => fs.existsSync(homes[a]))) {
+    out.write('\n');
+    if (!confirm(ask, `Install hooks for ${agent}?`, true)) continue;
+    try { hooksCommand({ agent, write: true }, ask); out.write(`if the hooks were written, restart ${agent} to load them\n`); } catch (e) { out.write(`hooks for ${agent} skipped: ${e.message}\n`); }
+  }
+  optionalStep(ask, available, runner);
+  out.write('\nInstall check:\n');
+  return doctorCommand({});
+}
+
 export async function main(argv) {
   const [cmd, ...rest] = argv;
   const { flags } = parseArgs(rest, { booleans: ['write'], values: ['agent', 'opencodeModel', 'cwd'] });
   if (!cmd || cmd === '--help' || cmd === '-h' || flags.help) { process.stdout.write(HELP); return cmd ? 0 : 2; }
+  if (cmd === 'init') { requireTty('setup init'); return runInit(); }
   if (cmd === 'lanes') return lanesCommand(flags);
   if (cmd === 'hooks') return hooksCommand(flags);
   if (cmd === 'doctor') return doctorCommand(flags);

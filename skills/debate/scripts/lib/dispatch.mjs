@@ -23,7 +23,7 @@ export function resolveRole(role, { explicit, lane, cwd }) {
   const config = loadLaneConfig(cwd);
   const entry = config.lanes && config.lanes[lane];
   if (!entry) {
-    throw new Error(`lane "${lane}" is not configured. Run ${cliCommand('setup lanes')}, or pass --${role} <implementer>`);
+    throw new Error(`lane "${lane}" is not configured. Run ${cliCommand('setup init')} in your own terminal (or setup lanes), or pass --${role} <implementer>`);
   }
   // The relay's own trust check never runs because dials are passed explicitly, so it happens here.
   if (entry.source === 'project' && !config.projectTrusted) {

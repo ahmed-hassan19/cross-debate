@@ -29,7 +29,8 @@ node "<debate-dir>/scripts/debate.mjs" review <pr-url | number> [--dry-run]
   configuration (`.claude/`, `.codex/`, `.opencode/`, `opencode.json[c]`, `.mcp.json`) is removed, so a reviewed PR's
   hooks, plugins or MCP servers never run.
 - The reviewers are two delegate-skills lanes, `review-main` and `review-debate`. If either is missing the
-  command says so; create them with `debate.mjs setup lanes`. Bind them to two different implementers: the debate
+  command says so; ask the user to run `debate.mjs setup init` in their own terminal
+  (`setup lanes` proposes defaults non-interactively). Bind them to two different implementers: the debate
   is only worth something when the second model doesn't share the first one's blind spots. For a one-off, pass
   `--main <implementer>` or `--debate <implementer>` (OpenCode needs a model, so use `--main-lane`/`--debate-lane`
   with a lane that binds one). Only implementers whose relay has `--read-only` are
