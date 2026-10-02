@@ -85,7 +85,9 @@ The offline suite exercises every host adapter, lifecycle gates, scope transitio
 | Cursor (experimental) | beforeShellExecution | manual use only | no | yes |
 | OpenCode (experimental) | `tool.execute.before` through a generated plugin | manual use only | no | yes |
 
-`setup hooks --agent <host>` prints the exact entries; `setup doctor` reports which are installed. Every hook runs `debate.mjs hook <host> <event>`, exits 0 on internal errors (fail open), and passes unmapped events through. Claude reminds only in plan mode or while it owns an active candidate; Codex receives a plan or code instruction on every prompt. On Cursor and OpenCode, invoke the plan and code workflows yourself with `--seat cursor` or `--seat opencode` and an explicit `--session`.
+`setup hooks --agent <host>` prints the exact entries; `setup doctor` reports which are installed. Every hook runs `debate.mjs hook <host> <event>`, exits 0 on internal errors (fail open), and passes unmapped events through. Claude reminds only in plan mode or while it owns an active candidate; Codex receives a plan or code instruction on every prompt.
+
+On Cursor and OpenCode, invoke the plan and code workflows yourself with `--seat cursor` or `--seat opencode`. Their hooks do not provide the agent with a session ID. Use the actual host session ID if available and valid, or choose a unique token for this task, such as `review-20261002-task`. A valid ID has 1–128 characters, starts with a letter or number, and contains only ASCII letters, numbers, `.`, `_`, `:` or `-`. Reuse that exact value for every `--session` in the task's plan and code commands, including `baseline`, `defer` and `resume`; resume requires the original seat and session. Outside automatic scope, Claude and Codex can also choose a token for an explicit review when no native session ID is available.
 
 ## Removal
 

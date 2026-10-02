@@ -3,7 +3,8 @@
 Only you communicate with the user. Verify every source finding, including withdrawn findings.
 Never push without explicit candidate-and-destination approval; never amend published history.
 Keep the candidate local throughout review; do not bypass project checks or use --no-verify.
-Commands use your seat (`claude`, `codex`, `cursor` or `opencode`) and the hook-provided session ID.
+Commands use your seat (`claude`, `codex`, `cursor` or `opencode`) and a stable session ID.
+Claude and Codex use the hook-provided ID; Cursor and OpenCode choose and reuse one as described in [operations](operations.md#hosts).
 `<cross-debate-dir>` and the scope rules are defined in the skill's SKILL.md. Outside automatic scope, invoke only on
 explicit request; approval requirements still apply even though automatic review and permit guards are inactive.
 The `review` subcommand ([review](review.md)) is the backend; explicit review requests do not require enrollment.
@@ -74,8 +75,9 @@ completes, reads the result with `code wait --run "<run>" --max-wait 1s`. Every 
    Re-run project checks and use separate staging/amend tool calls, then invoke review again.
    Removed and context lines are scanned too: removing a secret already in the base still trips the scan and needs an explicitly approved waiver.
    An unresolvable scan hit or unsupported state must be reported; do not bypass the scanner to send the diff.
-   For reviewer failure, use code review --run "<run>" --retry once, with the same execution rule.
-   After that retry fails, STOP and ask the user. This includes rate limits, unavailable agents, timeouts,
+   A rate-limited failure spends the automatic retry immediately: do not run --retry; report the reset hint and ask.
+   For other reviewer failures, use code review --run "<run>" --retry once per run, with the same execution rule.
+   After that retry fails, STOP and ask the user. This includes unavailable agents, timeouts,
    service/internal errors, invalid output, and read-only violations (investigate those before any retry).
    Read the recovery procedure in [operations](operations.md). Offer only verified
    alternatives: another available reviewer, self-review, pause, or retry the original after recovery.

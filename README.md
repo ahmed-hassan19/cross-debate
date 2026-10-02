@@ -189,7 +189,7 @@ hooks = true
 writable_roots = ["/absolute/path/to/your-home/.local/share/debate"]
 ```
 
-Restart your agent, trust the hooks when prompted, and use the prompts in [Install and use](#install-and-use).
+Restart your agent, trust the hooks when prompted, and follow [Install and use](#install-and-use).
 To preview individual settings, use `node "$D" setup lanes` or `node "$D" setup hooks --agent claude`.
 Add `--write` to apply a preview in your own terminal. For OpenCode lanes, add
 `--opencode-model provider/model` to `setup lanes`.

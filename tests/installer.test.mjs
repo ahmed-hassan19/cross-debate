@@ -82,6 +82,21 @@ test('install merges settings and comments; repeat installation preserves hooks 
   assert.equal(spawnSync(git, ['-C', home, 'config', '--local', '--get', 'debate.enabled'], { encoding: 'utf8' }).stdout.trim(), 'true');
 });
 
+test('command help works before installation without changing settings or calling reviewers', () => {
+  const entrypoint = path.resolve('bin/cross-debate.mjs');
+  for (const command of ['install', 'plan', 'code', 'review', 'scope', 'stats', 'setup']) {
+    for (const flag of ['--help', '-h']) {
+      const result = spawnSync(process.execPath, [entrypoint, command, flag], { encoding: 'utf8', timeout: 5000 });
+      assert.equal(result.status, 0, `${command} ${flag}: ${result.stderr}`);
+      assert.ok(result.stdout.trim(), `${command} ${flag} must show help`);
+    }
+  }
+  assert.deepEqual(fs.readdirSync(home), ['bin']);
+  const command = spawnSync(process.execPath, [entrypoint, 'scope', 'status'], { encoding: 'utf8' });
+  assert.equal(command.status, 1);
+  assert.match(command.stderr, /Install first/);
+});
+
 test('version works before installation and distinguishes an older installed skill', () => {
   const args = [path.resolve('bin/cross-debate.mjs'), '--version'];
   const fresh = spawnSync(process.execPath, args, { encoding: 'utf8' });

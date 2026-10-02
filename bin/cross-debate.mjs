@@ -274,11 +274,14 @@ export async function install(ui = p, cwd = process.cwd()) {
     if (!await ask('confirm', { message: 'Apply these changes?', initialValue: true })) throw new Error('cancelled');
     const backup = applyInstall(plan);
     if (backup) ui.log.info(`Backups: ${backup}`);
+    const automaticHosts = hosts.filter(host => host === 'claude' || host === 'codex');
+    const attached = scope.configured || attach;
     ui.note([
       'Restart your agent to load cross-debate.',
       ...(hosts.includes('codex') ? ['In Codex, review and trust the new hooks when prompted.'] : []),
-      ...(!scope.configured && !attach ? [`To attach a project: ${installCommand} scope enable --cwd /path/to/project`] : []),
-      'Try: Plan [your change]. Use cross-debate to cross-review the plan before presenting it.',
+      ...(!attached ? [`To attach a project: ${installCommand} scope enable --cwd /path/to/project`] : []),
+      ...(attached && automaticHosts.length ? [`In ${automaticHosts.map(host => labels[host]).join(' and ')}, enter plan mode and describe your task. Plan and code reviews run automatically.`] : []),
+      ...(!attached || hosts.some(host => host === 'cursor' || host === 'opencode') ? ['For a manual review, ask: Use cross-debate to review this plan.'] : []),
     ].join('\n'), 'Next');
     ui.outro('Installed. Your next agent session can use cross-debate.');
     return 0;
@@ -290,12 +293,13 @@ export async function install(ui = p, cwd = process.cwd()) {
 }
 
 async function main(argv) {
+  const help = argv.includes('--help') || argv.includes('-h');
   if (['--version', '-v'].includes(argv[0])) {
     console.log(`cross-debate ${version}`);
     if (fs.existsSync(path.join(installDir(), 'SKILL.md'))) console.log(`Installed skill: ${skillVersion(installDir())}`);
     return 0;
   }
-  if (['--help', '-h'].includes(argv[0])) {
+  if (['--help', '-h'].includes(argv[0]) || (argv[0] === 'install' && help)) {
     console.log(`cross-debate
 
 Install or update:
@@ -316,8 +320,11 @@ Run installation in your own terminal. Node 22+ is required.`);
     if (!process.stdin.isTTY || !process.stdout.isTTY) throw new Error(`Installation needs an interactive terminal. Run ${installCommand} yourself.`);
     return install();
   }
-  const cli = path.join(installDir(), 'scripts', 'debate.mjs');
-  if (!fs.existsSync(cli)) throw new Error(`Install first: ${installCommand}`);
+  let cli = path.join(installDir(), 'scripts', 'debate.mjs');
+  if (!fs.existsSync(cli)) {
+    if (!help || !['plan', 'code', 'review', 'scope', 'stats', 'setup'].includes(argv[0])) throw new Error(`Install first: ${installCommand}`);
+    cli = path.join(SKILL_DIR, 'scripts', 'debate.mjs');
+  }
   const result = spawnSync(process.execPath, [cli, ...argv], { stdio: 'inherit' });
   if (result.error) throw result.error;
   return result.status ?? 1;
