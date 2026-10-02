@@ -71,13 +71,29 @@ checkout on purpose.
 
 ## Setup
 
-Run setup in **your own terminal**, through the same catalog path your agent sees (for example
-`~/.claude/skills/debate`): permission allowlists match paths literally. Once after installing:
+Run setup in **your own terminal**, through the path your agent loads the skill from: permission allowlists
+match paths literally. With `-g`, the skills CLI puts it in each agent's global skills folder:
+
+| Agent | Skill path |
+|---|---|
+| Claude Code | `~/.claude/skills/debate` |
+| Codex | `~/.codex/skills/debate` |
+| Cursor | `~/.cursor/skills/debate` |
+| OpenCode | `~/.config/opencode/skills/debate` |
+
+`npx skills ls -g` lists what is installed. Pick the path of the agent you use most, then run once:
 
 ```sh
-D=~/.claude/skills/debate/scripts/debate.mjs   # adjust to your install path
+D=~/.claude/skills/debate/scripts/debate.mjs   # your path from the table above
 node "$D" setup init
 ```
+
+Terms the wizard uses:
+
+- **Lane:** a named reviewer slot (`plan-main`, `plan-debate`, `review-main`, `review-debate`), bound to one reviewer CLI
+  and optionally a model and effort.
+- **Implementer:** the CLI that runs a lane (`claude`, `codex` or `opencode`).
+- **Seat:** the agent you are working in. `plan-main-<seat>` lets each agent get a different first plan reviewer.
 
 `init` asks, step by step, which CLI, model and effort each reviewer lane uses (Enter keeps the shown default),
 whether to install the hooks for each agent it finds, and whether to install the optional skills below that are
