@@ -114,15 +114,18 @@ function confirmAndWrite(file, before, after, write = (f, text) => fs.writeFileS
 // ---------- lanes ----------
 
 /**
- * Lanes to add for the available reviewer CLIs, never touching existing ones. plan-main-<seat> binds to a CLI
- * other than the seat; plan-debate and review-main take the first CLI in fixed order, review-debate a different one.
+ * Lanes to add for the available reviewer CLIs, never touching existing ones. plan-debate and review-main take the
+ * first CLI in fixed order, review-debate a different one. plan-main-<seat> must differ from plan-debate so each seat
+ * gets two models; after that it avoids an opencode lane with no model, then the seat's own CLI.
  */
 export function proposeLanes(available, existing = {}, { opencodeModel = null } = {}) {
   const order = REVIEWER_CLIS.filter(c => available.includes(c));
   if (!order.length) throw usage(`no reviewer CLI found on PATH (${REVIEWER_CLIS.join(', ')})`);
   const other = (cli) => order.find(c => c !== cli) ?? cli;
   const wanted = { [PLAN_LANES.main]: order[0], [PLAN_LANES.debate]: order[0], [CODE_REVIEW_LANES[0]]: order[0], [CODE_REVIEW_LANES[1]]: other(order[0]) };
-  if (order.length > 1) for (const seat of order) wanted[`${PLAN_LANES.main}-${seat}`] = other(seat);
+  const firstPlan = (seat) => order.filter(c => c !== order[0])
+    .sort((a, b) => ((a === 'opencode' && !opencodeModel) - (b === 'opencode' && !opencodeModel)) || ((a === seat) - (b === seat)))[0];
+  if (order.length > 1) for (const seat of order) wanted[`${PLAN_LANES.main}-${seat}`] = firstPlan(seat);
   const lanes = {};
   const templates = {};
   for (const [name, implementer] of Object.entries(wanted)) {
@@ -453,11 +456,13 @@ const defaultRunner = (argv) => spawnSync(argv[0], argv.slice(1), { stdio: 'inhe
 export async function runInit({ ask = terminalAsk, runner = defaultRunner } = {}) {
   const out = process.stdout;
   const available = REVIEWER_CLIS.filter(onPath);
+  // Read before discovery: probing a CLI can create its home, which would then look like an agent in use.
+  const homes = { claude: claudeHome(), codex: codexHome(), cursor: path.join(os.homedir(), '.cursor'), opencode: opencodeHome() };
+  const agents = AGENTS.filter(a => fs.existsSync(homes[a]));
   out.write(`debate setup. Reviewer CLIs on PATH: ${available.join(', ') || 'none'}\n`);
   if (!available.length) out.write(`no reviewer CLI found (${REVIEWER_CLIS.join(', ')}); install one and rerun init to configure lanes\n`);
   else if (confirm(ask, 'Configure reviewer lanes?', true)) await fleetStep(ask, available, discoverModels());
-  const homes = { claude: claudeHome(), codex: codexHome(), cursor: path.join(os.homedir(), '.cursor'), opencode: opencodeHome() };
-  for (const agent of AGENTS.filter(a => fs.existsSync(homes[a]))) {
+  for (const agent of agents) {
     out.write('\n');
     if (!confirm(ask, `Install hooks for ${agent}?`, true)) continue;
     try { hooksCommand({ agent, write: true }, ask); out.write(`if the hooks were written, restart ${agent} to load them\n`); } catch (e) { out.write(`hooks for ${agent} skipped: ${e.message}\n`); }

@@ -166,7 +166,11 @@ test('setup lanes proposes only missing lanes, pairs seats with another CLI, and
   const three = setup.proposeLanes(['codex', 'claude', 'opencode'], { 'review-main': { implementer: 'opencode', model: 'p/m' } });
   assert.equal(three.lanes['review-main'], undefined, 'existing lanes are never replaced');
   assert.deepEqual(three.lanes['plan-main-claude'], { implementer: 'codex' });
-  assert.deepEqual(three.lanes['plan-main-codex'], { implementer: 'claude' });
+  assert.deepEqual(three.lanes['plan-main-codex'], { implementer: 'codex' }, 'never the plan-debate CLI; a modelless opencode lane ranks last');
+  assert.deepEqual(three.lanes['plan-main-opencode'], { implementer: 'codex' });
+  const seats = ['codex', 'claude', 'opencode'];
+  assert.equal(setup.seatPairs({ ...three.lanes, 'review-main': {} }, seats).filter(l => /repeats the primary/.test(l)).length, 0);
+  assert.deepEqual(setup.proposeLanes(seats, {}, { opencodeModel: 'p/m' }).lanes['plan-main-codex'], { implementer: 'opencode', model: 'p/m' });
   assert.deepEqual(three.lanes['plan-debate'], { implementer: 'claude' });
   assert.deepEqual(three.lanes['review-debate'], { implementer: 'codex' });
   assert.deepEqual(three.templates, {});
@@ -477,7 +481,9 @@ test('push forms the shell rewrites stay gated: continuations, expanding heredoc
 test('setup flags a plan pairing whose secondary repeats the primary reviewer', () => {
   const ok = run(['setup', 'lanes'], { env: { XDG_CONFIG_HOME: path.join(SCRATCH, 'pairing-xdg'), PATH: binWith(['claude', 'codex']) } });
   assert.equal(ok.status, 0, ok.stdout + ok.stderr);
-  assert.match(ok.stdout, /seat codex: plan reviewers claude then claude \(same-model secondary: repeats the primary reviewer\)/);
+  assert.match(ok.stdout, /seat codex: plan reviewers codex then claude\n/, 'the default proposal gives every seat two models');
+  assert.match(setup.seatPairs({ 'plan-main': { implementer: 'claude' }, 'plan-debate': { implementer: 'claude' } }, ['codex'])[0],
+    /seat codex: plan reviewers claude then claude \(same-model secondary: repeats the primary reviewer\)/);
 });
 
 test('a debate reviewer that supplies new_findings as anything but an array is rejected, not read as clean', async () => {
