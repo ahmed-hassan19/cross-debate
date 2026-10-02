@@ -87,7 +87,7 @@ reorder them or add a `##` heading above section 3.
 - `D*` findings can only end as `agreed` or `withdrawn`. A `D*` the main reviewer rejects with evidence
   is `withdrawn` with the objection in `debate_note`. It is never `contested`, so a rejected claim from
   the second model is never posted. A `D*` that duplicates an `F*` is `withdrawn` with `debate_note`
-  "duplicate of F<n>".
+  `"duplicate of F<n>"`.
 
 ## Run log
 
