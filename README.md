@@ -102,30 +102,9 @@ To remove cross-debate completely, follow [the removal steps](skills/cross-debat
 
 ## How reviews work
 
-**Plan review**
-
-```mermaid
-flowchart LR
-  P[Final plan] --> R1[plan-main<br/>reviewer] --> R2[plan-debate<br/>reviewer]
-  R2 --> V[Orchestrator verifies<br/>and asks one batch<br/>of questions]
-  V -->|up to 3 rounds| P
-  V --> F[Plan with<br/>review block]
-```
-
-**Code review**
-
-```mermaid
-flowchart LR
-  I[Implement the<br/>reviewed plan] --> C[Candidate commit] --> M[review-main] --> D[review-debate] --> M2[review-main<br/>final call]
-  M2 --> VC[Verify, amend,<br/>re-review] --> Rcpt[Review receipt]
-```
-
-**Push**
-
-```mermaid
-flowchart LR
-  Rcpt[Review receipt] --> A[You approve<br/>the push] --> Push[Exactly the<br/>approved git push]
-```
+1. Two reviewers examine the plan or code and challenge the findings.
+2. Your agent verifies the claims, addresses confirmed issues, and repeats the review as needed, up to three rounds.
+3. You approve the exact commit and destination before the agent pushes.
 
 The agent that is working for you stays the orchestrator: it verifies every reviewer claim against the code, and
 a second model agreeing is not treated as proof. Hooks enforce the flow: in an enrolled repository a plan cannot be
