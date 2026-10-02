@@ -1357,7 +1357,7 @@ test('adoption: parent mismatch, merge and root commits, multi-commit ancestor r
   const root = gitc(linear, 'rev-parse', 'HEAD');
   fs.writeFileSync(path.join(linear, 'a.txt'), 'a'); gitc(linear, 'add', '-A'); gitc(linear, 'commit', '-q', '-m', 'feat: a');
   const bare = path.join(SCRATCH, 'bare-pub.git');
-  gitc(SCRATCH, 'init', '-q', '--bare', bare);
+  gitc(SCRATCH, 'init', '-q', '--bare', '-b', 'main', bare);
   gitc(linear, 'remote', 'add', 'origin', bare);
   gitc(linear, 'push', '-q', 'origin', 'main');
   fs.writeFileSync(path.join(linear, 'd.txt'), 'd'); gitc(linear, 'add', '-A'); gitc(linear, 'commit', '-q', '-m', 'feat: d');
@@ -1683,7 +1683,7 @@ test('agreed stop, code: a non-blocking finding fixed by amendment with no_furth
   const repo = makeRepo();
   const sid = 'sess-agreed-code';
   const bare = path.join(SCRATCH, 'bare-agreed.git');
-  gitc(SCRATCH, 'init', '-q', '--bare', bare);
+  gitc(SCRATCH, 'init', '-q', '--bare', '-b', 'main', bare);
   gitc(repo, 'remote', 'add', 'origin', bare);
   hook('claude', 'SessionStart', hookPayload(sid, repo));
   const softenF1 = (d) => { for (const f of [...d.stages.main.doc.findings, ...d.stages.final.doc.findings]) if (f.id === 'F1') f.severity = 'non-blocking'; return d; };
@@ -1751,7 +1751,7 @@ test('code Stop promotion: receipted commits from a linked worktree, published c
   const repo = makeRepo();
   const sid = 'sess-promote';
   const bare = path.join(SCRATCH, 'bare-promote.git');
-  gitc(SCRATCH, 'init', '-q', '--bare', bare);
+  gitc(SCRATCH, 'init', '-q', '--bare', '-b', 'main', bare);
   gitc(repo, 'remote', 'add', 'origin', bare);
   gitc(repo, 'push', '-q', 'origin', 'main');
   hook('claude', 'SessionStart', hookPayload(sid, repo));
@@ -2025,7 +2025,7 @@ test('push approval: exact command binding, consumption, replay, force/tags/mirr
   const repo = makeRepo();
   const sid = 'sess-push';
   const bare = path.join(SCRATCH, 'bare-push.git');
-  gitc(SCRATCH, 'init', '-q', '--bare', bare);
+  gitc(SCRATCH, 'init', '-q', '--bare', '-b', 'main', bare);
   gitc(repo, 'remote', 'add', 'origin', bare);
   const begun = cli('code', ['begin', '--seat', 'claude', '--session', sid, '--cwd', repo]).json;
   fs.writeFileSync(path.join(repo, 'p.txt'), 'p\n');
