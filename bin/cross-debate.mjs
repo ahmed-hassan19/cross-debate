@@ -14,6 +14,7 @@ import { globalConfigPath, parseConfigDocument } from '../skills/cross-debate/ve
 const labels = { claude: 'Claude Code', codex: 'Codex', cursor: 'Cursor (experimental)', opencode: 'OpenCode (experimental)' };
 const reviewerCLIs = ['claude', 'codex', 'opencode'];
 const requiredLanes = ['plan-main', 'plan-debate', 'review-main', 'review-debate'];
+const installCommand = 'npx --yes github:ahmed-hassan19/cross-debate';
 const version = JSON.parse(fs.readFileSync(new URL('../package.json', import.meta.url), 'utf8')).version;
 const json = value => `${JSON.stringify(value, null, 2)}\n`;
 const stat = file => { try { return fs.lstatSync(file); } catch (e) { if (e.code === 'ENOENT') return null; throw e; } };
@@ -276,7 +277,7 @@ export async function install(ui = p, cwd = process.cwd()) {
     ui.note([
       'Restart your agent to load cross-debate.',
       ...(hosts.includes('codex') ? ['In Codex, review and trust the new hooks when prompted.'] : []),
-      ...(!scope.configured && !attach ? ['To attach a project: npx cross-debate scope enable --cwd /path/to/project'] : []),
+      ...(!scope.configured && !attach ? [`To attach a project: ${installCommand} scope enable --cwd /path/to/project`] : []),
       'Try: Plan [your change]. Use cross-debate to cross-review the plan before presenting it.',
     ].join('\n'), 'Next');
     ui.outro('Installed. Your next agent session can use cross-debate.');
@@ -295,15 +296,28 @@ async function main(argv) {
     return 0;
   }
   if (['--help', '-h'].includes(argv[0])) {
-    console.log('cross-debate\n\n  npx cross-debate                  Install or update interactively\n  npx cross-debate scope enable     Attach the current Git project\n  npx cross-debate scope status     Check project enrollment\n  npx cross-debate setup doctor     Check dependencies\n  npx cross-debate review <PR URL> --dry-run\n\nRun installation in your own terminal. Node 22+ is required.');
+    console.log(`cross-debate
+
+Install or update:
+  ${installCommand}
+
+Other commands:
+  ${installCommand} <command>
+
+  scope enable                Attach the current Git project
+  scope status                Check project enrollment
+  setup doctor                Check dependencies
+  review <PR URL> --dry-run    Preview a PR review
+
+Run installation in your own terminal. Node 22+ is required.`);
     return 0;
   }
   if (!argv.length || (argv.length === 1 && argv[0] === 'install')) {
-    if (!process.stdin.isTTY || !process.stdout.isTTY) throw new Error('Installation needs an interactive terminal. Run npx cross-debate yourself.');
+    if (!process.stdin.isTTY || !process.stdout.isTTY) throw new Error(`Installation needs an interactive terminal. Run ${installCommand} yourself.`);
     return install();
   }
   const cli = path.join(installDir(), 'scripts', 'debate.mjs');
-  if (!fs.existsSync(cli)) throw new Error('Install first: npx cross-debate');
+  if (!fs.existsSync(cli)) throw new Error(`Install first: ${installCommand}`);
   const result = spawnSync(process.execPath, [cli, ...argv], { stdio: 'inherit' });
   if (result.error) throw result.error;
   return result.status ?? 1;

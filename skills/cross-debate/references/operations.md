@@ -89,7 +89,7 @@ The offline suite exercises every host adapter, lifecycle gates, scope transitio
 
 ## Removal
 
-Run `npx cross-debate scope disable --cwd "/path/to/project"` for each attached clone first. If a candidate is active, finish it or explicitly waive it before disabling. Linked worktrees share enrollment.
+Run `npx --yes github:ahmed-hassan19/cross-debate scope disable --cwd "/path/to/project"` for each attached clone first. If a candidate is active, finish it or explicitly waive it before disabling. Linked worktrees share enrollment.
 
 Then close your agent sessions and remove the following entries in your editor. Preserve unrelated settings; do not restore a whole old settings backup over newer edits.
 

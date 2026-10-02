@@ -4,7 +4,7 @@
   "description": "Cross-agent review for plans, code, and pull requests.",
   "type": "module",
   "license": "MIT",
-  "repository": "github:ahmed-hassan19/debate-skill",
+  "repository": "github:ahmed-hassan19/cross-debate",
   "bin": { "cross-debate": "bin/cross-debate.mjs" },
   "files": ["bin/", "skills/cross-debate/"],
   "engines": { "node": ">=22" },

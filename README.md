@@ -19,19 +19,13 @@ and merged-branch deletion.
 
 ### 1. Install and attach your project
 
-The npm release is pending. To try the installer from this checkout today:
+Run this from your project's directory:
 
 ```sh
-npm ci
-npm exec -- cross-debate
+npx --yes github:ahmed-hassan19/cross-debate
 ```
 
-Once published, run this from your project's directory:
-
-```sh
-npx cross-debate@latest
-```
-
+This downloads the installer directly from GitHub. No clone or npm account is needed.
 The wizard asks where you work, offers detected reviewers or lets you choose models, and asks whether to
 attach the current Git project. It shows one summary before applying changes. You do not need a config file.
 It installs the skill, merges hooks and reviewer settings, and updates Codex's TOML settings while preserving
@@ -40,11 +34,10 @@ existing writable roots. Cancel before applying to leave settings unchanged.
 If you started the installer outside your project, attach it afterward:
 
 ```sh
-npx cross-debate scope enable --cwd "/absolute/path/to/your-project"
+npx --yes github:ahmed-hassan19/cross-debate scope enable --cwd "/absolute/path/to/your-project"
 ```
 
-Before the npm release, use `npm exec -- cross-debate` in place of `npx cross-debate` from this checkout for
-all commands below. Project attachment lives in local Git configuration, covers linked worktrees, and commits
+Project attachment lives in local Git configuration, covers linked worktrees, and commits
 nothing. Each teammate and clone opts in separately.
 
 Restart your agent. In Codex, review and trust the new hooks when prompted. The installer configures the
@@ -70,7 +63,7 @@ that exact commit. Cursor and OpenCode need these explicit requests; their hooks
 To review a GitHub PR without posting yet:
 
 ```sh
-npx cross-debate review https://github.com/OWNER/REPO/pull/123 --dry-run
+npx --yes github:ahmed-hassan19/cross-debate review https://github.com/OWNER/REPO/pull/123 --dry-run
 ```
 
 Omit `--dry-run` to post the GitHub review. Explicit review requests also work in unattached projects.
@@ -80,11 +73,11 @@ Omit `--dry-run` to post the GitHub review. Explicit review requests also work i
 
 | What you want | Command |
 |---|---|
-| Update the skill or choose different reviewers | `npx cross-debate@latest` |
-| Check dependencies and configuration | `npx cross-debate setup doctor` |
-| Show the CLI and installed skill versions | `npx cross-debate --version` |
-| Check the current project's enrollment | `npx cross-debate scope status` |
-| Turn automatic reviews off for the current clone | `npx cross-debate scope disable` |
+| Update the skill or choose different reviewers | `npx --yes github:ahmed-hassan19/cross-debate` |
+| Check dependencies and configuration | `npx --yes github:ahmed-hassan19/cross-debate setup doctor` |
+| Show the CLI and installed skill versions | `npx --yes github:ahmed-hassan19/cross-debate --version` |
+| Check the current project's enrollment | `npx --yes github:ahmed-hassan19/cross-debate scope status` |
+| Turn automatic reviews off for the current clone | `npx --yes github:ahmed-hassan19/cross-debate scope disable` |
 
 Warnings about unused hosts do not require installing them. Doctor does not test reviewer authentication
 or native hook trust.
@@ -164,7 +157,7 @@ reviewer slot, its **implementer** is the CLI that runs it, and a **seat** is th
 - **Stores:** run state and receipts in `DEBATE_HOME`; review artifacts in `~/.cache/debate-review/`.
 - **Allowlist:** one entry covers every command, e.g. `Bash(node "<path>/debate.mjs":*)`; `setup hooks --agent
   claude` prints it for both the catalog path and its real path.
-- **Statistics:** `npx cross-debate stats [--kind plan|code] [--since 30d]`.
+- **Statistics:** `npx --yes github:ahmed-hassan19/cross-debate stats [--kind plan|code] [--since 30d]`.
 
 <details>
 <summary>Manual setup commands and installation from a clone</summary>
@@ -174,8 +167,8 @@ your agent reads. This example uses Claude Code:
 
 ```sh
 mkdir -p ~/src ~/.claude/skills
-git clone https://github.com/ahmed-hassan19/debate-skill.git ~/src/debate-skill
-ln -s ~/src/debate-skill/skills/cross-debate ~/.claude/skills/cross-debate
+git clone https://github.com/ahmed-hassan19/cross-debate.git ~/src/cross-debate
+ln -s ~/src/cross-debate/skills/cross-debate ~/.claude/skills/cross-debate
 D="$HOME/.claude/skills/cross-debate/scripts/debate.mjs"
 node "$D" setup init
 node "$D" scope enable --cwd "/absolute/path/to/your-project"

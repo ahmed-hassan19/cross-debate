@@ -28,7 +28,7 @@ or generated archives. Follow the README's pinned-source procedure when updating
 
 ## Reporting a problem
 
-[Open an issue](https://github.com/ahmed-hassan19/debate-skill/issues) with your install command and version,
+[Open an issue](https://github.com/ahmed-hassan19/cross-debate/issues) with your install command and version,
 OS, `node --version`, host, reviewer CLIs, expected result, and the smallest reproduction. Include relevant
 `setup doctor` output. Remove tokens, private repository URLs, personal paths, and source code you cannot share.
 For a workflow problem, include the failed stage and error class; a full session transcript is rarely needed.
@@ -47,6 +47,7 @@ For a workflow problem, include the failed stage and error class; a full session
    to the maintainer.
 6. Verify the registry version and run `npx cross-debate@<version> --help` from outside the checkout. Create a
    matching version tag and GitHub release with the changes and known limitations. Never move a published tag
-   or reuse a published version. Update the README's release status only after registry verification.
+   or reuse a published version. Switch the README and installer hints to the shorter npm registry command
+   only after registry verification.
 
 Keep publication separate from ordinary test and pull-request workflows. A failed publication is not a release.
