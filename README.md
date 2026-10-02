@@ -26,20 +26,29 @@ A skill for coding agents that makes two different models argue about your work 
   pushed after you approve that exact commit and destination.
 - **Pull requests** (or a working tree) get a two-model review posted as one GitHub `COMMENT` review.
 
+**Plan review**
+
 ```mermaid
 flowchart LR
-  subgraph Plan
-    P[Final plan] --> R1[plan-main reviewer] --> R2[plan-debate reviewer]
-    R2 --> V[Orchestrator verifies findings<br/>and asks one batch of questions]
-    V -->|up to 3 rounds| P
-    V --> F[Finished plan with review block]
-  end
-  subgraph Code
-    C[Candidate commit] --> M[review-main] --> D[review-debate] --> M2[review-main final call]
-    M2 --> VC[Verify, amend, re-review]
-    VC --> Rcpt[Receipt] --> A[You approve push] --> Push[Exact approved git push]
-  end
-  F -. implement .-> C
+  P[Final plan] --> R1[plan-main<br/>reviewer] --> R2[plan-debate<br/>reviewer]
+  R2 --> V[Orchestrator verifies<br/>and asks one batch<br/>of questions]
+  V -->|up to 3 rounds| P
+  V --> F[Plan with<br/>review block]
+```
+
+**Code review**
+
+```mermaid
+flowchart LR
+  I[Implement the<br/>reviewed plan] --> C[Candidate commit] --> M[review-main] --> D[review-debate] --> M2[review-main<br/>final call]
+  M2 --> VC[Verify, amend,<br/>re-review] --> Rcpt[Review receipt]
+```
+
+**Push**
+
+```mermaid
+flowchart LR
+  Rcpt[Review receipt] --> A[You approve<br/>the push] --> Push[Exactly the<br/>approved git push]
 ```
 
 The agent that is working for you stays the orchestrator: it verifies every reviewer claim against the code, and
