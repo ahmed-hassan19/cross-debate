@@ -23,21 +23,14 @@ Run this from your project's directory:
 npx --yes github:ahmed-hassan19/cross-debate
 ```
 
-This command downloads the installer from GitHub. Choose your agents and reviewers, then decide whether to
-attach the current Git project. Review the summary and choose Apply. The installer configures the skill,
-hooks, and reviewers; you do not need to clone this repository, sign into npm, or write a config file.
-Cancelling before Apply leaves settings unchanged.
+In the installer:
 
-Restart your agent after installation. In Codex, review and trust the new hooks when prompted.
+1. Select the agents you use, such as Claude Code or Codex.
+2. Accept the recommended reviewers, or choose two reviewers and their models.
+3. Choose **Yes** to enable automatic reviews for this project.
+4. Review the summary and confirm **Apply these changes**.
 
-If you started the installer outside your project, attach it afterward:
-
-```sh
-npx --yes github:ahmed-hassan19/cross-debate scope enable --cwd "/absolute/path/to/your-project"
-```
-
-Attaching enables automatic reviews for that clone and its linked worktrees. The setting lives in local Git
-configuration, so each teammate and separate clone opts in independently.
+Restart your agent. In Codex, accept the hook-trust prompt after reviewing it.
 
 ### 2. Use it
 
@@ -77,6 +70,7 @@ Explicit review requests work even when the project is not attached.
 | What you want | Command |
 |---|---|
 | Update the skill or choose different reviewers | `npx --yes github:ahmed-hassan19/cross-debate` |
+| Attach another project | `npx --yes github:ahmed-hassan19/cross-debate scope enable --cwd "/path/to/project"` |
 | Check dependencies and configuration | `npx --yes github:ahmed-hassan19/cross-debate setup doctor` |
 | Show the CLI and installed skill versions | `npx --yes github:ahmed-hassan19/cross-debate --version` |
 | Check the current project's enrollment | `npx --yes github:ahmed-hassan19/cross-debate scope status` |
