@@ -513,12 +513,13 @@ function scripted(rules = []) {
   return ask;
 }
 /** Run the wizard against a fresh HOME and config dir with the given CLIs on PATH; stdout is captured. */
-async function init(clis, ask, { runner = () => 0, home } = {}) {
+async function init(clis, ask, { runner = () => 0, home, xdg } = {}) {
   const saved = { PATH: process.env.PATH, HOME: process.env.HOME, XDG_CONFIG_HOME: process.env.XDG_CONFIG_HOME };
   const scratch = fs.mkdtempSync(path.join(SCRATCH, 'init-'));
   process.env.HOME = home ?? path.join(scratch, 'home');
   fs.mkdirSync(process.env.HOME, { recursive: true });
-  process.env.XDG_CONFIG_HOME = path.join(scratch, 'xdg');
+  const configHome = xdg ?? path.join(scratch, 'xdg');
+  process.env.XDG_CONFIG_HOME = configHome;
   process.env.PATH = binWith(clis);
   const write = process.stdout.write;
   let text = '';
@@ -529,14 +530,16 @@ async function init(clis, ask, { runner = () => 0, home } = {}) {
     process.stdout.write = write;
     Object.assign(process.env, saved);
   }
-  const file = path.join(scratch, 'xdg', 'delegate-skills', 'config.json');
-  return { text, lanes: fs.existsSync(file) ? JSON.parse(fs.readFileSync(file, 'utf8')).lanes : null };
+  const file = path.join(configHome, 'delegate-skills', 'config.json');
+  return { xdg: configHome, text, lanes: fs.existsSync(file) ? JSON.parse(fs.readFileSync(file, 'utf8')).lanes : null };
 }
 
 test('setup init: Enter on every prompt writes exactly the proposed lanes, and n at the confirm writes nothing', async () => {
   const accepted = await init(['claude', 'codex'], scripted([[/Write this change/, ['y']]]));
   assert.deepEqual(accepted.lanes, setup.proposeLanes(['claude', 'codex'], {}).lanes);
   assert.equal(accepted.text.includes('discovering models'), false, 'accepting the defaults skips model discovery');
+  assert.match(accepted.text, /\+ review-debate: codex default model/, 'the write preview names each lane');
+  assert.match(accepted.text, /\[sandbox_workspace_write\]\nwritable_roots/, 'init shows the Codex config.toml lines when it offers Codex hooks');
   assert.match(accepted.text, /seat claude: plan reviewers codex then claude/);
   const declined = await init(['claude', 'codex'], scripted([[/Write this change/, ['n']]]));
   assert.equal(declined.lanes, null);
@@ -548,10 +551,12 @@ test('setup init binds the chosen CLI, model and effort, and re-prompts an inval
     [/^review-main CLI/, ['codex']], [/^review-main model/, ['gpt-5.5']], [/^review-main effort/, ['high']],
     [/^plan-main effort/, ['bogus', 'xhigh']], [/own first plan reviewer/, ['n']], [/Change any/, ['y']], [/Write this change/, ['y']],
   ]);
-  const { lanes } = await init(['claude', 'codex'], ask);
+  const { lanes, xdg } = await init(['claude', 'codex'], ask);
   assert.deepEqual(lanes['review-main'], { implementer: 'codex', model: 'gpt-5.5', effort: 'high' });
   assert.deepEqual(lanes['plan-main'], { implementer: 'claude', effort: 'xhigh' });
   assert.equal(ask.asked.filter(q => /^plan-main effort/.test(q)).length, 2);
+  const again = await init(['claude', 'codex'], scripted([[/own first plan reviewer/, ['n']]]), { xdg });
+  assert.match(again.text, /lanes unchanged; nothing to write/);
   assert.equal(lanes['plan-main-claude'], undefined);
 });
 
@@ -615,4 +620,14 @@ test('setup init refuses without a terminal and writes nothing; a missing lane p
   try {
     assert.throws(() => resolveRole('main', { lane: 'review-main', cwd: SCRATCH }), /setup init/);
   } finally { process.env.XDG_CONFIG_HOME = saved; }
+});
+
+test('scope prints a short summary at a terminal and the full JSON otherwise', async () => {
+  const { scopeSummary } = await import(path.join(SCRIPTS, 'debate.mjs'));
+  const text = scopeSummary({ identity: { worktreeRoot: '/r' }, enabled: true, effective: true, warnings: [], supersededApprovals: 0, activeCandidates: [] });
+  assert.match(text, /^debate is enabled for \/r\nStart a fresh agent session/);
+  assert.doesNotMatch(text, /repoKey/);
+  const repo = enrolledRepo('scope-json-repo');
+  const r = run(['scope', 'status', '--cwd', repo]);
+  assert.equal(JSON.parse(r.stdout).enabled, true, 'without a terminal agents still get JSON');
 });

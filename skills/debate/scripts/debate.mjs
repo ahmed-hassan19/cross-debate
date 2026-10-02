@@ -9,7 +9,7 @@ Usage:
   debate.mjs code <command> ...       review a local candidate commit, approve pushes (code --help)
   debate.mjs review <pr|--local> ...  two-model debate review of a GitHub PR or working tree (review --help)
   debate.mjs setup init|lanes|hooks|doctor configure reviewer lanes and host hooks, check the install (setup --help)
-  debate.mjs scope enable|disable|status --cwd <dir>
+  debate.mjs scope enable|disable|status --cwd <dir> [--json]
   debate.mjs stats [--kind plan|code] [--seat ${SEATS.join('|')}] [--since 30d] [--json]
   debate.mjs hook <agent> <event>     host hook dispatcher (JSON payload on stdin)
 
@@ -22,8 +22,21 @@ function shared(argv) {
   if (argv[0] === 'stats') { ensureHome(debateHome()); return statsCommand(flags, debateHome()); }
   const cwd = resolveCwdArg(flags.cwd);
   if (positional.length !== 1 || !['enable', 'disable', 'status'].includes(positional[0])) throw usage('scope requires enable, disable, or status');
-  printJson(positional[0] === 'status' ? { ok: true, ...repositoryScope(cwd) } : changeRepositoryScope(cwd, positional[0] === 'enable'));
+  const result = positional[0] === 'status' ? { ok: true, ...repositoryScope(cwd) } : changeRepositoryScope(cwd, positional[0] === 'enable');
+  // Agents run without a terminal and parse the JSON; a person at a terminal gets a summary unless they ask for --json.
+  if (process.stdout.isTTY && !flags.json) process.stdout.write(scopeSummary(result));
+  else printJson(result);
   return 0;
+}
+
+export function scopeSummary(r) {
+  const lines = [`debate is ${r.enabled ? 'enabled' : 'disabled'} for ${r.identity.worktreeRoot}${r.enabled && !r.effective ? ', but not in effect (see warnings)' : ''}`];
+  for (const w of r.warnings || []) lines.push(`warning: ${w}`);
+  if (r.supersededApprovals) lines.push(`${r.supersededApprovals} pending push approval(s) revoked`);
+  if (r.activeCandidates?.length) lines.push(`${r.activeCandidates.length} active review candidate(s) in this repository`);
+  if (r.enabled && r.effective && r.supersededApprovals !== undefined) lines.push('Start a fresh agent session there; plan and code reviews now run automatically.');
+  lines.push('(--json prints the full result)');
+  return `${lines.join('\n')}\n`;
 }
 
 /** review.mjs exits 2 (usage) and 3 (already reviewed) itself; any thrown failure exits 1 with the debate-review: prefix. */

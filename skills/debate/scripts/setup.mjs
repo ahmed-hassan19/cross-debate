@@ -99,10 +99,10 @@ function confirm(ask, question, def = false) {
 }
 
 /** Show the change, require a human y, back up, then write. Without an injected ask it needs a terminal. */
-function confirmAndWrite(file, before, after, write = (f, text) => fs.writeFileSync(f, text), ask = null) {
+function confirmAndWrite(file, before, after, write = (f, text) => fs.writeFileSync(f, text), ask = null, summary = null) {
   if (!ask) { requireTty(); ask = terminalAsk; }
   if (before === after) { process.stdout.write(`${file}: already up to date\n`); return false; }
-  process.stdout.write(`\n${file}\n${lineDiff(before, after)}\n\n`);
+  process.stdout.write(`\n${file}\n${summary ?? lineDiff(before, after)}\n\n`);
   if (!confirm(ask, 'Write this change?')) { process.stdout.write('not written\n'); return false; }
   fs.mkdirSync(path.dirname(file), { recursive: true });
   if (fs.existsSync(file)) fs.copyFileSync(file, `${file}.debate-bak`);
@@ -278,8 +278,9 @@ function hooksCommand(flags, ask = null) {
     before = doc ? `${JSON.stringify(doc, null, 2)}\n` : '';
     after = `${JSON.stringify(mergeHooks(agent, doc, entries), null, 2)}\n`;
   }
-  out.write(`\nentries:\n${agent === 'opencode' ? after : JSON.stringify(mergeHooks(agent, {}, entries), null, 2)}\n`);
-  if (entries.allow) out.write(`\npermission allowlist (settings.json permissions.allow):\n${entries.allow.map(a => `  ${a}`).join('\n')}\n`);
+  // With --write the diff below shows the same entries, so print them only on a dry run.
+  if (!flags.write) out.write(`\nentries:\n${agent === 'opencode' ? after : JSON.stringify(mergeHooks(agent, {}, entries), null, 2)}\n`);
+  if (entries.allow && !flags.write) out.write(`\npermission allowlist (settings.json permissions.allow):\n${entries.allow.map(a => `  ${a}`).join('\n')}\n`);
   if (agent === 'codex') {
     out.write(`\nAdd to ${path.join(codexHome(), 'config.toml')} yourself (setup never edits TOML):\n[features]\nhooks = true\n\n[sandbox_workspace_write]\nwritable_roots = [${JSON.stringify(debateHome())}]\n`);
     out.write('Codex asks you to trust new or changed hook definitions on the next interactive start; review and accept them there.\n');
@@ -329,7 +330,7 @@ function doctorCommand(flags) {
     let present = false;
     // JSON settings escape the quote inside the marker; the OpenCode plugin file stores it raw.
     try { const text = fs.readFileSync(file, 'utf8'); present = text.includes(marker(agent)) || text.includes(JSON.stringify(marker(agent)).slice(1, -1)); } catch { present = false; }
-    add(present ? 'ok' : 'warn', `hooks ${agent}`, present ? file : `not installed (${file})`);
+    add(present ? 'ok' : 'warn', `hooks ${agent}`, present ? file : `not installed (${file}); to add: node ${JSON.stringify(invokedCli())} setup hooks --agent ${agent} --write`);
   }
   const mark = { ok: '✓', warn: '!', fail: '✗' };
   for (const r of rows) process.stdout.write(`${mark[r.level]} ${r.what}: ${r.detail}\n`);
@@ -441,8 +442,14 @@ async function fleetStep(ask, available, modelsFor) {
   out.write('\n');
   for (const w of proposal.warnings) out.write(`warning: ${w}\n`);
   for (const line of seatPairs(merged.lanes, available)) out.write(`${line}\n`);
+  const changes = Object.entries(chosen).flatMap(([name, lane]) => {
+    const old = Object.hasOwn(current.lanes, name) ? current.lanes[name] : null;
+    if (!old) return [`  + ${name}: ${describeLane(lane)}`];
+    return JSON.stringify(old) === JSON.stringify(lane) ? [] : [`  ~ ${name}: ${describeLane(old)} -> ${describeLane(lane)}`];
+  });
+  if (!changes.length && fs.existsSync(file)) { out.write('lanes unchanged; nothing to write\n'); return; }
   const before = fs.existsSync(file) ? fs.readFileSync(file, 'utf8') : '';
-  confirmAndWrite(file, before, `${JSON.stringify(parsed.document, null, 2)}\n`, (f) => config.writeAtomic(f, parsed.document), ask);
+  confirmAndWrite(file, before, `${JSON.stringify(parsed.document, null, 2)}\n`, (f) => config.writeAtomic(f, parsed.document), ask, changes.join('\n'));
 }
 
 function optionalStep(ask, available, runner) {
