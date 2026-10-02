@@ -187,7 +187,7 @@ test('setup lanes proposes only missing lanes, pairs seats with another CLI, and
   assert.equal(fs.existsSync(path.join(xdg, 'delegate-skills', 'config.json')), false);
   const ok = run(['setup', 'lanes'], { env: { XDG_CONFIG_HOME: xdg, PATH: binWith(['claude', 'codex']) } });
   assert.equal(ok.status, 0, ok.stdout + ok.stderr);
-  assert.match(ok.stdout, /seat claude: plan reviewers codex then claude \(same-model secondary\)/);
+  assert.match(ok.stdout, /seat claude: plan reviewers codex then claude \(secondary is the seat's own CLI/);
   assert.match(ok.stdout, /dry run/);
   assert.equal(fs.existsSync(path.join(xdg, 'delegate-skills', 'config.json')), false);
 });
@@ -483,7 +483,7 @@ test('setup flags a plan pairing whose secondary repeats the primary reviewer', 
   assert.equal(ok.status, 0, ok.stdout + ok.stderr);
   assert.match(ok.stdout, /seat codex: plan reviewers codex then claude\n/, 'the default proposal gives every seat two models');
   assert.match(setup.seatPairs({ 'plan-main': { implementer: 'claude' }, 'plan-debate': { implementer: 'claude' } }, ['codex'])[0],
-    /seat codex: plan reviewers claude then claude \(same-model secondary: repeats the primary reviewer\)/);
+    /seat codex: plan reviewers claude then claude \(secondary repeats the primary reviewer/);
 });
 
 test('a debate reviewer that supplies new_findings as anything but an array is rejected, not read as clean', async () => {
@@ -536,6 +536,7 @@ async function init(clis, ask, { runner = () => 0, home } = {}) {
 test('setup init: Enter on every prompt writes exactly the proposed lanes, and n at the confirm writes nothing', async () => {
   const accepted = await init(['claude', 'codex'], scripted([[/Write this change/, ['y']]]));
   assert.deepEqual(accepted.lanes, setup.proposeLanes(['claude', 'codex'], {}).lanes);
+  assert.equal(accepted.text.includes('discovering models'), false, 'accepting the defaults skips model discovery');
   assert.match(accepted.text, /seat claude: plan reviewers codex then claude/);
   const declined = await init(['claude', 'codex'], scripted([[/Write this change/, ['n']]]));
   assert.equal(declined.lanes, null);
@@ -545,7 +546,7 @@ test('setup init: Enter on every prompt writes exactly the proposed lanes, and n
 test('setup init binds the chosen CLI, model and effort, and re-prompts an invalid effort', async () => {
   const ask = scripted([
     [/^review-main CLI/, ['codex']], [/^review-main model/, ['gpt-5.5']], [/^review-main effort/, ['high']],
-    [/^plan-main effort/, ['bogus', 'xhigh']], [/per host/, ['n']], [/Write this change/, ['y']],
+    [/^plan-main effort/, ['bogus', 'xhigh']], [/own first plan reviewer/, ['n']], [/Change any/, ['y']], [/Write this change/, ['y']],
   ]);
   const { lanes } = await init(['claude', 'codex'], ask);
   assert.deepEqual(lanes['review-main'], { implementer: 'codex', model: 'gpt-5.5', effort: 'high' });
@@ -555,7 +556,7 @@ test('setup init binds the chosen CLI, model and effort, and re-prompts an inval
 });
 
 test('setup init re-prompts an opencode lane until it has a provider/model', async () => {
-  const ask = scripted([[/^review-debate model/, ['', 'default', 'prov/m']], [/per host/, ['n']], [/Write this change/, ['y']]]);
+  const ask = scripted([[/^review-debate model/, ['', 'default', 'prov/m']], [/own first plan reviewer/, ['n']], [/Write this change/, ['y']]]);
   const { lanes } = await init(['claude', 'opencode'], ask);
   assert.deepEqual(lanes['review-debate'], { implementer: 'opencode', model: 'prov/m' });
   assert.equal(ask.asked.filter(q => /^review-debate model/.test(q)).length, 3);

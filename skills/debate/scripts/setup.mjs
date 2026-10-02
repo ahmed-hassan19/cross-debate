@@ -145,7 +145,7 @@ export function seatPairs(lanes, seats) {
     const primary = first?.implementer ?? null;
     const secondary = second?.implementer ?? null;
     const repeatsPrimary = secondary && secondary === primary && (second.model ?? null) === (first.model ?? null);
-    return `seat ${seat}: plan reviewers ${primary ?? 'missing'} then ${secondary ?? 'missing'}${repeatsPrimary ? ' (same-model secondary: repeats the primary reviewer)' : secondary === seat ? ' (same-model secondary)' : ''}`;
+    return `seat ${seat}: plan reviewers ${primary ?? 'missing'} then ${secondary ?? 'missing'}${repeatsPrimary ? ' (secondary repeats the primary reviewer: one model reviews twice)' : secondary === seat ? " (secondary is the seat's own CLI: the author's model reviews its own plan)" : ''}`;
   });
 }
 async function delegateConfig() {
@@ -321,7 +321,7 @@ function doctorCommand(flags) {
       add(readOnly ? 'ok' : 'fail', `lane ${lane}`, `${entry.implementer}${entry.model ? ` ${entry.model}` : ''} (${entry.source})${readOnly ? '' : ': relay lacks --read-only'}`);
     } catch (e) { add('fail', `lane ${lane}`, e.message); }
   }
-  for (const line of seatPairs(lanes, available)) add(line.includes('same-model') ? 'warn' : 'ok', 'plan pairing', line);
+  for (const line of seatPairs(lanes, available)) add(line.includes('(secondary') ? 'warn' : 'ok', 'plan pairing', line);
   const writable = probeWritable(debateHome());
   add(writable ? 'fail' : 'ok', 'DEBATE_HOME', writable || debateHome());
   for (const agent of AGENTS) {
@@ -333,6 +333,8 @@ function doctorCommand(flags) {
   }
   const mark = { ok: '✓', warn: '!', fail: '✗' };
   for (const r of rows) process.stdout.write(`${mark[r.level]} ${r.what}: ${r.detail}\n`);
+  const count = (level) => rows.filter(r => r.level === level).length;
+  process.stdout.write(`${count('ok')} ok, ${count('warn')} warnings, ${count('fail')} failures\n`);
   return rows.some(r => r.level === 'fail') ? 1 : 0;
 }
 
@@ -384,7 +386,9 @@ function discoverModels() {
   } catch { return {}; }
 }
 
-async function fleetStep(ask, available, models) {
+const describeLane = (lane) => [lane.implementer, lane.model ?? 'default model', lane.effort ?? lane.variant].filter(Boolean).join(' ');
+
+async function fleetStep(ask, available, modelsFor) {
   const config = await delegateConfig();
   const impls = await import(pathToFileURL(findScript('delegate-setup', 'implementers.mjs')).href);
   const efforts = { claude: impls.CLAUDE_EFFORT, agy: impls.AGY_EFFORT, copilot: impls.COPILOT_EFFORT, omp: impls.OMP_THINKING };
@@ -392,22 +396,30 @@ async function fleetStep(ask, available, models) {
   const current = config.readConfigFile(file)?.document ?? { version: 'delegate-fleet.v1', lanes: {} };
   const proposal = proposeLanes(available, {});
   const out = process.stdout;
-  out.write(`\nReviewer lanes (config ${file}). Enter keeps the value in brackets.\n`);
+  out.write(`\nReviewer lanes (config ${file})\n`);
   const names = [PLAN_LANES.main, PLAN_LANES.debate, ...CODE_REVIEW_LANES];
   const seatLanes = available.map(s => `${PLAN_LANES.main}-${s}`);
-  if (available.length > 1 && confirm(ask, 'Different first plan reviewer per host?', true)) names.push(...seatLanes);
+  const perHost = available.length > 1 && confirm(ask, 'Give each host its own first plan reviewer (plan-main-<host>, overriding plan-main)?', true);
+  if (perHost) names.push(...seatLanes);
   const checkLane = (name, lane) => {
     const parsed = config.parseConfigDocument(JSON.stringify({ version: current.version, lanes: { [name]: lane } }), 'lane');
     return parsed.ok ? null : parsed.error.replace(/^lane: /, '');
   };
+  const bases = Object.fromEntries(names.map(name => [name, Object.hasOwn(current.lanes, name) ? current.lanes[name]
+    : (proposal.lanes[name] ?? { implementer: proposal.templates[name]?.implementer ?? available[0] })]));
+  out.write(`\n${Object.hasOwn(current.lanes, PLAN_LANES.main) ? 'Current' : 'Proposed'} lanes:\n`);
+  for (const name of names) out.write(`  ${name.padEnd(20)} ${describeLane(bases[name])}${checkLane(name, bases[name]) ? '  (needs a model)' : ''}\n`);
+  if (perHost) out.write(`plan-main is only the fallback: each plan-main-<host> lane overrides it for that host.\n`);
+  const changeAll = confirm(ask, 'Change any of these?');
   const chosen = {};
   for (const name of names) {
-    const base = Object.hasOwn(current.lanes, name) ? current.lanes[name] : (proposal.lanes[name] ?? { implementer: proposal.templates[name]?.implementer ?? available[0] });
+    const base = bases[name];
+    if (!changeAll && !checkLane(name, base)) { chosen[name] = base; continue; }
     out.write('\n');
     const implementer = pick(ask, `${name} CLI`, { choices: [...new Set([...available, base.implementer])], def: base.implementer });
     const kept = implementer === base.implementer ? base : {};
-    const listed = (models[implementer] ?? []).slice(0, 40);
-    const model = pick(ask, `${name} model (number, name, or default)`, {
+    const listed = modelsFor(implementer).slice(0, 40);
+    const model = pick(ask, listed.length ? `${name} model (number, name, or default)` : `${name} model (no model list found for ${implementer}; type a name, or default for the CLI's own)`, {
       choices: [...listed, 'default'], def: kept.model ?? 'default', free: true,
       check: m => checkLane(name, buildLane({ base: kept, implementer, model: m })),
     });
@@ -416,7 +428,7 @@ async function fleetStep(ask, available, models) {
     let value = 'none';
     if (dial) {
       const choices = [...(efforts[implementer] ?? []), 'none'];
-      value = pick(ask, `${name} ${dial}${efforts[implementer] ? '' : ' (free text, or none)'}`, {
+      value = pick(ask, `${name} ${dial}${efforts[implementer] ? '' : ` (type a value ${implementer} accepts, or none for its default)`}`, {
         choices, def: kept[dial] ?? 'none', free: !efforts[implementer],
         check: v => checkLane(name, buildLane({ base: kept, implementer, model, dial, value: v })),
       });
@@ -456,12 +468,17 @@ const defaultRunner = (argv) => spawnSync(argv[0], argv.slice(1), { stdio: 'inhe
 export async function runInit({ ask = terminalAsk, runner = defaultRunner } = {}) {
   const out = process.stdout;
   const available = REVIEWER_CLIS.filter(onPath);
-  // Read before discovery: probing a CLI can create its home, which would then look like an agent in use.
+  // Read before discovery: probing a CLI can create its home folder.
   const homes = { claude: claudeHome(), codex: codexHome(), cursor: path.join(os.homedir(), '.cursor'), opencode: opencodeHome() };
-  const agents = AGENTS.filter(a => fs.existsSync(homes[a]));
+  const bins = { claude: 'claude', codex: 'codex', cursor: 'cursor-agent', opencode: 'opencode' };
+  const agents = AGENTS.filter(a => fs.existsSync(homes[a]) || onPath(bins[a]));
   out.write(`debate setup. Reviewer CLIs on PATH: ${available.join(', ') || 'none'}\n`);
   if (!available.length) out.write(`no reviewer CLI found (${REVIEWER_CLIS.join(', ')}); install one and rerun init to configure lanes\n`);
-  else if (confirm(ask, 'Configure reviewer lanes?', true)) await fleetStep(ask, available, discoverModels());
+  else if (confirm(ask, 'Configure reviewer lanes?', true)) {
+    let models = null;
+    const modelsFor = (impl) => { if (!models) { out.write('discovering models…\n'); models = discoverModels(); } return models[impl] ?? []; };
+    await fleetStep(ask, available, modelsFor);
+  }
   for (const agent of agents) {
     out.write('\n');
     if (!confirm(ask, `Install hooks for ${agent}?`, true)) continue;

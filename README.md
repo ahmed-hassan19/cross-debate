@@ -67,6 +67,9 @@ With the [skills CLI](https://github.com/vercel-labs/skills) (symlinks by defaul
 npx skills add ahmed-hassan19/debate-skill -g
 ```
 
+Run it in a normal terminal, not inside an agent session: the skills CLI detects an agent and then installs to
+every agent non-interactively. It also offers its own `find-skills` skill, which you can decline.
+
 Or clone and link it yourself:
 
 ```sh
@@ -81,19 +84,12 @@ checkout on purpose.
 ## Setup
 
 Run setup in **your own terminal**, through the path your agent loads the skill from: permission allowlists
-match paths literally. With `-g`, the skills CLI puts it in each agent's global skills folder:
-
-| Agent | Skill path |
-|---|---|
-| Claude Code | `~/.claude/skills/debate` |
-| Codex | `~/.codex/skills/debate` |
-| Cursor | `~/.cursor/skills/debate` |
-| OpenCode | `~/.config/opencode/skills/debate` |
-
-`npx skills ls -g` lists what is installed. Pick the path of the agent you use most, then run once:
+match paths literally. With `-g`, the skills CLI (1.7) installs the skill once in `~/.agents/skills/debate`, which
+Codex, Cursor, OpenCode and other agents read directly, and adds a symlink at `~/.claude/skills/debate` for Claude
+Code if you select it. `npx skills ls -g` lists what is installed. Then run once:
 
 ```sh
-D=~/.claude/skills/debate/scripts/debate.mjs   # your path from the table above
+D=~/.agents/skills/debate/scripts/debate.mjs   # or ~/.claude/skills/debate/... if you use Claude Code
 node "$D" setup init
 ```
 
@@ -104,8 +100,8 @@ Terms the wizard uses:
 - **Implementer:** the CLI that runs a lane (`claude`, `codex` or `opencode`).
 - **Seat:** the agent you are working in. `plan-main-<seat>` lets each agent get a different first plan reviewer.
 
-`init` asks, step by step, which CLI, model and effort each reviewer lane uses (Enter keeps the shown default),
-whether to install the hooks for each agent it finds, and whether to install the optional skills below that are
+`init` shows the proposed reviewer lanes and lets you change any lane's CLI, model and effort (Enter keeps the
+shown default), then asks whether to install the hooks for each agent it finds, and whether to install the optional skills below that are
 missing; then it runs `doctor`. The individual commands remain for scripting:
 
 ```sh
@@ -121,8 +117,9 @@ as a writable root); Codex asks you to trust the new hooks on its next start. Re
 
 ## Getting started
 
-1. Enroll a repository (automation is off everywhere else):
-   `node "$D" scope enable --cwd /path/to/repo`
+1. Enroll each repository where reviews should run automatically (automation is off everywhere else):
+   `node "$D" scope enable --cwd /path/to/repo`. This sets `debate.enabled=true` in that clone's own
+   `.git/config`; nothing is committed, so every clone (and each teammate) enrolls separately.
 2. Start a fresh agent session there and plan in plan mode. Before the plan is shown, the agent runs the plan
    review, asks you its remaining decisions in one batch, and appends a review block.
 3. Let it implement. Before it reports done, it commits one candidate, runs the code review, fixes confirmed
