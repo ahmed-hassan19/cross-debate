@@ -34,20 +34,22 @@ Restart your agent. In Codex, accept the hook-trust prompt after reviewing it.
 
 ### 2. Use it
 
-In Claude Code or Codex plan mode, replace the bracketed text and send:
+Once enabled in a project, cross-debate runs automatically in Claude Code and Codex:
+
+1. Enter plan mode and describe your task. The agent loads the skill and cross-reviews the plan before presenting it.
+2. Approve the plan and proceed with implementation. The agent reviews the code, fixes confirmed blockers,
+   and asks for approval before pushing.
+
+<details>
+<summary>Manual reviews: Cursor, OpenCode, unattached projects, and pull requests</summary>
+
+In Cursor or OpenCode, or in a project without automatic reviews enabled, ask the agent to use cross-debate:
 
 ```text
-Plan [the change I want]. Use cross-debate to cross-review the plan before presenting it.
+Use cross-debate to review this plan.
 ```
 
-After agreeing on the plan:
-
-```text
-Implement the plan and use cross-debate to review the result before reporting done.
-```
-
-Your agent fixes confirmed blockers and asks for approval before pushing. Cursor and OpenCode need these
-explicit review requests; their hooks cover Git commit and push commands only.
+For code, replace "this plan" with "these changes".
 
 To review a GitHub PR without posting yet:
 
@@ -62,7 +64,7 @@ To review the current working tree locally:
 npx --yes github:ahmed-hassan19/cross-debate review --local
 ```
 
-Explicit review requests work even when the project is not attached.
+</details>
 
 <details>
 <summary>Update, check setup, or stop automatic reviews</summary>
