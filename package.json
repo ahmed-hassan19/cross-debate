@@ -6,7 +6,7 @@
   "license": "MIT",
   "repository": "github:ahmed-hassan19/cross-debate",
   "bin": { "cross-debate": "bin/cross-debate.mjs" },
-  "files": ["bin/", "skills/cross-debate/"],
+  "files": ["bin/", "skills/cross-debate/", "docs/", "examples/"],
   "engines": { "node": ">=22" },
   "scripts": {
     "test": "node --test tests/*.test.mjs",

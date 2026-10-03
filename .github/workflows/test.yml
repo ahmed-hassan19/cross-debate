@@ -20,7 +20,7 @@ jobs:
       - uses: actions/setup-node@v7
         with:
           node-version: ${{ matrix.node }}
-      - run: node --test tests/hosts.test.mjs tests/workflow.test.mjs tests/briefs.test.mjs tests/readiness.test.mjs
+      - run: node --test tests/hosts.test.mjs tests/workflow.test.mjs tests/briefs.test.mjs tests/readiness.test.mjs tests/history-report.test.mjs tests/history-report-cli.test.mjs
   installer:
     strategy:
       matrix:

@@ -5,6 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { spawnSync } from 'node:child_process';
+import { parseConfigDocument } from '../skills/cross-debate/vendor/delegate-skills/delegate-setup/scripts/config.mjs';
 
 const root = fileURLToPath(new URL('../', import.meta.url));
 const read = file => fs.readFileSync(file, 'utf8');
@@ -37,7 +38,7 @@ test('packed skill installs outside the checkout and runs without npm dependenci
   for (const file of ['package.json', 'bin/cross-debate.mjs', 'LICENSE', 'skills/cross-debate/SKILL.md',
     'skills/cross-debate/LICENSE', 'skills/cross-debate/THIRD_PARTY_NOTICES.md']) assert.ok(paths.has(file), `missing ${file}`);
   for (const file of files(path.join(root, 'skills/cross-debate'))) assert.ok(paths.has(path.relative(root, file)), `not packed: ${file}`);
-  assert.ok([...paths].every(file => !/^(?:tests|node_modules|\.git)\//.test(file)));
+  assert.ok([...paths].every(file => !/^(?:tests|scripts|node_modules|\.git|\.github)\/|^CONTRIBUTING\.md$/.test(file)));
   run('tar', ['-xzf', path.join(temp, packed.filename), '-C', temp], { env });
   const unpacked = path.join(temp, 'package');
   // npm ci uses the reviewed dependency graph and the cache populated by npm ci in the checkout.
@@ -58,8 +59,17 @@ test('packed skill installs outside the checkout and runs without npm dependenci
     const value = frontmatter[1].match(new RegExp(`^${field}: (.+)$`, 'm'))?.[1];
     assert.ok(value && value.length <= limit, `${field} must be a nonempty string of at most ${limit} characters`);
   }
-  for (const file of files(skill).filter(file => file.endsWith('.md'))) {
-    for (const [, href] of read(file).matchAll(/\[[^\]]+\]\(([^)\s]+)\)/g)) {
+  for (const file of files(path.join(unpacked, 'examples'))) assert.equal(parseConfigDocument(read(file), file).ok, true);
+  const documents = [path.join(unpacked, 'README.md'), ...files(path.join(unpacked, 'docs')), ...files(skill)];
+  for (const file of documents.filter(file => file.endsWith('.md'))) {
+    const links = [...read(file).matchAll(/\[[^\]]+\]\(([^)\s]+)\)|(?:src|srcset)="([^"]+)"/g)];
+    for (const match of links) {
+      const href = match[1] || match[2];
+      const repository = 'https://github.com/ahmed-hassan19/cross-debate/blob/main/';
+      if (href.startsWith(repository)) {
+        assert.ok(fs.existsSync(path.join(root, href.slice(repository.length).split('#')[0])), `missing repository target: ${href}`);
+        continue;
+      }
       if (/^(?:[a-z]+:|#)/i.test(href)) continue;
       assert.ok(fs.existsSync(path.resolve(path.dirname(file), decodeURIComponent(href.split('#')[0]))), `${file}: broken link ${href}`);
     }

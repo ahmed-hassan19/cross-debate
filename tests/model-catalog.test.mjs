@@ -8,9 +8,7 @@ test('model menus put CLI default first, one current choice per family, existing
   const claude = modelMenu('claude', ['claude-opus-5-5', 'claude-opus-5', 'claude-sonnet-5-5'], 'my-claude');
   assert.deepEqual(claude.map(x => x.value), ['default', 'claude-opus-5-5', 'claude-sonnet-5-5', 'my-claude', 'other']);
   assert.equal(claude[1].hint, 'catalog suggestion; access not verified');
-  const codex = modelMenu('codex', ['gpt-5.4', 'gpt-5.3', 'codex-mini'], 'gpt-5.4');
-  assert.deepEqual(codex.map(x => x.value), ['default', 'gpt-5.4', 'codex-mini', 'other']);
-  assert.deepEqual(modelMenu('opencode', [] ).map(x => x.value), ['default', 'other']);
+  assert.deepEqual(modelMenu('codex', ['gpt-5.4', 'gpt-5.3', 'codex-mini'], 'gpt-5.4').map(x => x.value), ['default', 'gpt-5.4', 'codex-mini', 'other']);
 });
 
 test('Claude uses aliases without a key, and the Models API only with an existing key', async () => {

@@ -8,7 +8,7 @@ import { spawnSync } from 'node:child_process';
 import * as p from '@clack/prompts';
 import { initSync, parse, edit } from '@rainbowatcher/toml-edit-js';
 import { hookEntries, mergeHooks, opencodePlugin, buildLane, reviewerReadiness } from '../skills/cross-debate/scripts/setup.mjs';
-import { SKILL_DIR, debateHome, repositoryScope, writeAtomic, skillVersion } from '../skills/cross-debate/scripts/lib/common.mjs';
+import { SKILL_DIR, debateHome, repositoryScope, writeAtomic, skillVersion, shellQuote } from '../skills/cross-debate/scripts/lib/common.mjs';
 import { globalConfigPath, parseConfigDocument } from '../skills/cross-debate/vendor/delegate-skills/delegate-setup/scripts/config.mjs';
 import { discoverModelCatalog, modelMenu } from '../skills/cross-debate/scripts/lib/model-catalog.mjs';
 
@@ -285,11 +285,19 @@ export async function install(ui = p, cwd = process.cwd()) {
     const backup = applyInstall(plan);
     if (backup) ui.log.info(`Backups: ${backup}`);
     const automaticHosts = hosts.filter(host => host === 'claude' || host === 'codex');
+    const effective = repositoryScope(cwd).effective;
     ui.note([
+      `Installed cross-debate ${version} for ${hosts.map(host => labels[host]).join(', ')}.`,
+      `Current directory: ${scope.identity ? `Git repository; automatic reviews ${effective ? 'on' : 'off'}` : 'not a Git repository; no automatic reviews'}.`,
       'Restart your agent to load cross-debate.',
       ...(hosts.includes('codex') ? ['In Codex, review and trust the new hooks when prompted.'] : []),
-      ...(automaticHosts.length ? [`In Git projects, ${automaticHosts.map(host => labels[host]).join(' and ')} run plan and code reviews automatically. Use scope disable --cwd /path/to/project to opt out.`] : []),
-      ...(hosts.some(host => host === 'cursor' || host === 'opencode') ? ['For a manual review, ask: Use cross-debate to review this plan.'] : []),
+      'Verify from your project directory:',
+      ...hosts.map(host => `node ${shellQuote(path.join(homes[host], 'skills', 'cross-debate', 'scripts', 'debate.mjs'))} setup doctor --agent ${host} --cwd ${shellQuote(cwd)}`),
+      ...(effective && automaticHosts.length ? [`In ${automaticHosts.map(host => labels[host]).join(' and ')}, enter plan mode and describe your task. Plan and code reviews run automatically.`] : []),
+      ...(scope.identity ? ['Use scope disable --cwd /path/to/project to opt out; scope enable reverses it.'] : []),
+      'First review prompt: Use cross-debate to review a plan for adding a small regression test in this project.',
+      ...(hosts.some(host => host === 'cursor' || host === 'opencode') ? ['Cursor/OpenCode: request reviews explicitly; experimental hooks gate Git only.'] : []),
+      'Expect reviewer findings, the agent\'s verified decisions, and a review outcome. Sign-in and native hook execution still need an interactive check.',
     ].join('\n'), 'Next');
     ui.outro('Installed. Your next agent session can use cross-debate.');
     return 0;
@@ -319,8 +327,8 @@ Other commands:
   scope enable                Re-enable automatic reviews in this Git project
   scope disable               Opt this Git project and linked worktrees out
   scope status                Check automatic review status
-  setup doctor                Check dependencies
-  review <PR URL> --dry-run    Preview a PR review
+  setup doctor --agent codex  Check one host (or claude, cursor, opencode)
+  review <PR URL> --dry-run    Run models without posting the PR review
 
 Run installation in your own terminal. Node 22+ is required.`);
     return 0;
