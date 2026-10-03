@@ -176,7 +176,7 @@ test('setup lanes proposes only missing lanes, pairs seats with another CLI, and
   assert.deepEqual(three.templates, {});
   const single = setup.proposeLanes(['codex'], {});
   assert.deepEqual(Object.keys(single.lanes).sort(), ['plan-debate', 'plan-main', 'review-debate', 'review-main']);
-  assert.match(single.warnings[0], /same model/);
+  assert.match(single.warnings[0], /supported single-CLI setup.*diversity/);
   assert.deepEqual(setup.proposeLanes(['claude', 'opencode'], {}, { opencodeModel: 'provider/model' }).lanes['review-debate'], { implementer: 'opencode', model: 'provider/model' });
 
   const xdg = path.join(SCRATCH, 'fresh-xdg');

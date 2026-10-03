@@ -19,7 +19,7 @@ Usage:
   setup init
   setup lanes [--opencode-model <provider/model>] [--write]
   setup hooks --agent claude|codex|cursor|opencode [--write]
-  setup doctor [--cwd <dir>]
+  setup doctor [--agent claude|codex|cursor|opencode] [--cwd <dir>]
 
 init walks you through reviewer lanes (CLI, model, effort), host hooks and the optional skills (ponytail,
 babysit-pr), then runs doctor. Run it once after installing, in your own terminal.
@@ -30,6 +30,7 @@ lanes proposes only lanes missing from the global delegate-skills config (plan-m
 review-main, review-debate) for the reviewer CLIs on PATH. hooks prints the exact entries for one agent.
 --write shows the change and asks y/N; it needs an interactive terminal and keeps a *.debate-bak backup.
 Run setup through the same path your agent uses (the skill catalog path): permission allowlists match literally.
+doctor checks all hosts unless --agent selects one. It never launches reviewers or verifies sign-in/native hook trust.
 `;
 const REVIEWER_CLIS = ['claude', 'codex', 'opencode'];
 const AGENTS = ['claude', 'codex', 'cursor', 'opencode'];
@@ -139,7 +140,7 @@ export function proposeLanes(available, existing = {}, { opencodeModel = null } 
     else if (opencodeModel) lanes[name] = { implementer, model: opencodeModel };
     else templates[name] = { implementer, model: '<provider/model>' };
   }
-  const warnings = order.length === 1 ? [`only ${order[0]} is available: both plan reviewers and both code reviewers use the same model, so the debate has no independent second opinion`] : [];
+  const warnings = order.length === 1 ? [`only ${order[0]} is available: supported single-CLI setup; identical model choices limit reviewer diversity`] : [];
   return { lanes, templates, warnings };
 }
 /** Per seat, which CLIs review its plans, flagging a secondary that repeats the primary reviewer's model or the seat's own CLI. */
@@ -150,7 +151,7 @@ export function seatPairs(lanes, seats) {
     const primary = first?.implementer ?? null;
     const secondary = second?.implementer ?? null;
     const repeatsPrimary = secondary && secondary === primary && (second.model ?? null) === (first.model ?? null);
-    return `seat ${seat}: plan reviewers ${primary ?? 'missing'} then ${secondary ?? 'missing'}${repeatsPrimary ? ' (secondary repeats the primary reviewer: one model reviews twice)' : secondary === seat ? " (secondary is the seat's own CLI: the author's model reviews its own plan)" : ''}`;
+    return `seat ${seat}: plan reviewers ${primary ?? 'missing'} then ${secondary ?? 'missing'}${repeatsPrimary ? ' (secondary repeats the primary reviewer: supported, with limited model diversity)' : secondary === seat ? " (secondary is the seat's own CLI; review runs in a separate session)" : ''}`;
   });
 }
 async function delegateConfig() {
@@ -330,6 +331,9 @@ export async function reviewerReadiness(cwd, { globalConfig, seats = AGENTS } = 
 }
 
 async function doctorCommand(flags) {
+  if (flags.agent !== undefined && !AGENTS.includes(flags.agent)) throw usage(`--agent must be one of ${AGENTS.join('|')}`);
+  const seats = flags.agent ? [flags.agent] : AGENTS;
+  const cwd = path.resolve(flags.cwd || process.cwd());
   const rows = [];
   const add = (level, what, detail) => rows.push({ level, what, detail });
   add('ok', 'cross-debate', skillVersion());
@@ -348,24 +352,28 @@ async function doctorCommand(flags) {
     } catch (e) { add('fail', `${skill}/${script}`, e.message); }
   }
   const available = REVIEWER_CLIS.filter(onPath);
-  add(available.length >= 2 ? 'ok' : available.length ? 'warn' : 'fail', 'reviewer CLIs', available.join(', ') || 'none on PATH');
-  const cwd = path.resolve(flags.cwd || process.cwd());
+  add(available.length ? 'ok' : 'fail', 'reviewer CLIs', available.join(', ') || 'none on PATH');
   const scope = repositoryScope(cwd);
   add(scope.warnings.length ? 'warn' : 'ok', 'automatic reviews', !scope.identity ? 'off: not a Git repository' : scope.warnings.length ? scope.warnings.join('; ') : scope.enabled ? `on: ${scope.configured === null ? 'Git default' : 'explicitly enabled'}${scope.effective ? '' : ' (session off)'}` : 'off: explicit project opt-out');
-  const { lanes, checks } = await reviewerReadiness(cwd);
+  const { lanes, checks } = await reviewerReadiness(cwd, { seats });
   for (const { lane, entry, ok, error } of checks) {
-    const binding = entry ? `${entry.implementer}${entry.model ? ` ${entry.model}` : ''} (${entry.source})` : '';
+    const binding = entry ? `${entry.implementer} ${entry.model || '(CLI default model)'}${entry.effort ? ` effort=${entry.effort}` : ''}${entry.variant ? ` variant=${entry.variant}` : ''} (${entry.source})` : '';
     add(ok ? 'ok' : 'fail', `lane ${lane}`, ok ? binding : [binding, error].filter(Boolean).join(': '));
   }
-  for (const line of seatPairs(lanes, available)) add(line.includes('(secondary') ? 'warn' : 'ok', 'plan pairing', line);
+  if (checks.some(check => !check.ok)) add('warn', 'repair reviewers', 'run npx --yes github:ahmed-hassan19/cross-debate in your own terminal; inspect project overrides and their trust if reported above');
+  for (const line of seatPairs(lanes, seats)) add(line.includes('limited model diversity') ? 'warn' : 'ok', 'plan pairing', line);
+  if (lanes['review-main'] && lanes['review-debate'] && lanes['review-main'].implementer === lanes['review-debate'].implementer
+    && lanes['review-main'].model === lanes['review-debate'].model) add('warn', 'code pairing', 'supported; identical CLI/model choices limit reviewer diversity');
+  add('warn', 'reviewer sign-in', 'unverified; sign in using each configured CLI in your own terminal (doctor does not launch reviewers)');
   const writable = probeWritable(debateHome());
   add(writable ? 'fail' : 'ok', 'DEBATE_HOME', writable || debateHome());
-  for (const agent of AGENTS) {
+  for (const agent of seats) {
     const { file } = hookEntries(agent, invokedCli());
     let present = false;
     // JSON settings escape the quote inside the marker; the OpenCode plugin file stores it raw.
     try { const text = fs.readFileSync(file, 'utf8'); present = text.includes(marker(agent)) || text.includes(JSON.stringify(marker(agent)).slice(1, -1)); } catch { present = false; }
-    add(present ? 'ok' : 'warn', `hooks ${agent}`, present ? file : `not installed (${file}); to add: node ${JSON.stringify(invokedCli())} setup hooks --agent ${agent} --write`);
+    add(present ? 'ok' : 'warn', `hooks ${agent}`, present ? `definition marker found in ${file}; execution and native trust unverified` : `not installed (${file}); in your terminal: node ${JSON.stringify(invokedCli())} setup hooks --agent ${agent} --write`);
+    if (agent === 'codex') add('warn', 'Codex manual check', `doctor does not parse config.toml or verify native trust. In ${path.join(codexHome(), 'config.toml')}, ensure features.hooks = true and sandbox_workspace_write.writable_roots includes ${JSON.stringify(debateHome())}, preserving existing roots. Restart Codex and review/trust the hooks when prompted.`);
   }
   const mark = { ok: '✓', warn: '!', fail: '✗' };
   for (const r of rows) process.stdout.write(`${mark[r.level]} ${r.what}: ${r.detail}\n`);

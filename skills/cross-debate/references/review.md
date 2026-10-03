@@ -1,12 +1,13 @@
-# Two-model PR and local review
+# Two-reviewer PR and local review
 
-Two models argue before anything is posted. A main reviewer finds issues. A debate reviewer tries to
+Two reviewer sessions examine the change before anything is posted. A main reviewer finds issues. A debate reviewer tries to
 knock them down and may add its own. The main reviewer then makes the final call, and one review with
 inline comments lands on the GitHub PR. It posts from the user's own `gh` account as a non-approval
 `COMMENT` review. It never approves and never requests changes.
 
 You are the orchestrator. You run one command and relay the result. You do not review the diff
-yourself, and you do not touch the PR.
+yourself, and you do not touch the PR. Standalone output has no orchestrator verdict; the plan and candidate
+workflows separately require orchestrator verification. A single CLI is supported for both reviewer roles.
 
 Automatic use comes through the opted-in code workflow ([code](code.md)). Explicit requests for PR or local
 review work outside automatic scope; this command does not change repository config.
@@ -24,14 +25,14 @@ node "<cross-debate-dir>/scripts/debate.mjs" review <pr-url | number> [--dry-run
   URL. Relay stdout. `--local` never talks to a forge and rejects non-UTF-8 Git paths rather than decoding them lossily.
 - `<pr-url>` is a GitHub `/pull/N` URL. A bare number resolves against the cwd's `origin`. GitHub Enterprise hosts
   work when `gh` is logged in to them; any other forge is rejected with an explicit error.
-- `--dry-run` prints a live PR review instead of posting it. It does not combine with `--local`.
+- `--dry-run` runs models and consumes provider usage, then prints the review without posting. It does not combine with `--local`.
 - Reviewers run in a disposable checkout. Before they start, the diff is scanned for secrets and project agent
   configuration (`.claude/`, `.codex/`, `.opencode/`, `opencode.json[c]`, `.mcp.json`) is removed, so a reviewed PR's
   hooks, plugins or MCP servers never run.
 - The reviewers are two delegate-skills lanes, `review-main` and `review-debate`. If either is missing the
   command says so; ask the user to run `debate.mjs setup init` in their own terminal
-  (`setup lanes` proposes defaults non-interactively). Bind them to two different implementers: the debate
-  is only worth something when the second model doesn't share the first one's blind spots. For a one-off, pass
+  (`setup lanes` proposes defaults non-interactively). Different reviewer choices can add model diversity;
+  identical choices are supported but provide less diversity. For a one-off, pass
   `--main <implementer>` or `--debate <implementer>` (OpenCode needs a model, so use `--main-lane`/`--debate-lane`
   with a lane that binds one). Only implementers whose relay has `--read-only` are
   accepted. These two lanes belong to the reviewer; don't point them at a lane you use for other work.

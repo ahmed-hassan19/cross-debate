@@ -1,0 +1,4 @@
+interface:
+  display_name: "Cross Debate"
+  short_description: "Review plans, code, and pull requests"
+  default_prompt: "Use $cross-debate to review this plan or code change and verify each finding."
