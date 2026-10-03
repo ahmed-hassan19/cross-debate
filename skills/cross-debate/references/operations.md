@@ -4,7 +4,7 @@
 
 ## Scope
 
-Automatic coverage is evaluated at invocation time for every seat. Only Git repositories explicitly enrolled with direct local `debate.enabled=true` receive automatic reviews. Existing repositories with no setting, newly initialized repositories, and separate clones default off; there is no repository list, enrollment scan, or registry. Non-repositories receive no automatic review reminders or receipt gates. Minimal session bookkeeping (cwd, transcript, prompt generation) remains available for explicit invocations, without automatic baselines or candidate ledgers outside scope.
+Automatic coverage is evaluated at invocation time for every seat. Git repositories receive automatic reviews by default, including existing repositories, newly initialized repositories, separate clones, and linked worktrees. There is no repository list, enrollment scan, or registry. Non-repositories receive no automatic review reminders or receipt gates. Minimal session bookkeeping (cwd, transcript, prompt generation) remains available for explicit invocations, without automatic baselines or candidate ledgers outside scope.
 
 Inspect or change scope using the existing allowlisted entrypoint:
 
@@ -14,13 +14,13 @@ node "<cross-debate-dir>/scripts/debate.mjs" scope disable --cwd "<repo>"
 node "<cross-debate-dir>/scripts/debate.mjs" scope enable --cwd "<repo>"
 ```
 
-Status is read-only. Scope uses direct repository-local Git boolean `debate.enabled`, shared by linked worktrees; global/system/includes cannot enroll repositories. Missing or false means disabled; invalid or unreadable local-config reads mean disabled with a diagnostic. If Git cannot identify the repository, scope remains disabled with the existing null-identity behavior. Enrollment is shared by linked worktrees, but separate clones and nested repositories require their own enrollment. Use these commands rather than editing Git config: transitions supersede unconsumed push and delete approvals across linked worktrees. Disable refuses active candidates; finish or explicitly waive first. Missing/prunable/unreadable worktrees or ledgers require explicit repair before changing scope. Re-enabling never revives an old approval. Candidate ledgers remain worktree-specific.
+Status is read-only. Scope uses direct repository-local Git boolean `debate.enabled`, shared by linked worktrees; global/system/includes cannot change the default. Missing or true means enabled; explicit false means disabled. Invalid or unreadable local-config reads mean disabled with a diagnostic. If Git cannot identify the repository, scope remains disabled with the existing null-identity behavior. Use `scope disable` to opt out and `scope enable` to reverse it: transitions supersede unconsumed push and delete approvals across linked worktrees. Disable refuses active candidates; finish or explicitly waive first. Missing/prunable/unreadable worktrees or ledgers require explicit repair before changing scope. Re-enabling never revives an old approval. Candidate ledgers remain worktree-specific.
 
-Native `.git` write permissions still apply. Run `scope enable` from a plain shell when enrolling, then start fresh agent sessions; a mid-session activation requires the existing explicit baseline recovery instead of inventing a before-change baseline.
+Native `.git` write permissions still apply. After reversing an opt-out with `scope enable`, start fresh agent sessions; a mid-session activation requires the existing explicit baseline recovery instead of inventing a before-change baseline.
 
-Literal `cd` and `git -C` targets determine mutation scope, not the starting shell directory. A guarded push must occupy the whole command, optionally after one literal `cd <dir> &&`; Git `-c`, `--config-env`, `--exec-path`, and `--namespace` overrides are unsupported for guarded mutations. The only other permitted push form is the lease-guarded branch delete returned by `approve-delete`, valid once under its approval. Unsupported push syntax remains denied even outside scope: wrappers, substitutions, pipelines, unresolved/non-worktree targets, Git directory overrides, and GIT_* environment overrides. An ordinary literal push in an unenrolled worktree bypasses the automatic permit gate. Explicit skill use still requires candidate/destination approval; do not claim permit enforcement or consumption when guards are off. `DEBATE=off`, the debate-home off file, and child-session suppression retain their existing semantics.
+Literal `cd` and `git -C` targets determine mutation scope, not the starting shell directory. A guarded push must occupy the whole command, optionally after one literal `cd <dir> &&`; Git `-c`, `--config-env`, `--exec-path`, and `--namespace` overrides are unsupported for guarded mutations. The only other permitted push form is the lease-guarded branch delete returned by `approve-delete`, valid once under its approval. Unsupported push syntax remains denied even outside scope: wrappers, substitutions, pipelines, unresolved/non-worktree targets, Git directory overrides, and GIT_* environment overrides. An ordinary literal push in an opted-out worktree bypasses the automatic permit gate. Explicit skill use still requires candidate/destination approval; do not claim permit enforcement or consumption when guards are off. `DEBATE=off`, the debate-home off file, and child-session suppression retain their existing semantics.
 
-The `review` command is the backend invoked by `code review`. Automatic use comes through an enrolled workflow; explicit plan, code, or review requests remain supported without enrollment. No repository should be enrolled merely because a skill was invoked.
+The `review` command is the backend invoked by `code review`. Automatic use comes through the Git default; explicit plan, code, or review requests remain supported outside automatic scope. Invoking a skill does not write Git config.
 
 ## Reviewer failure and recovery
 
@@ -91,7 +91,7 @@ On Cursor and OpenCode, invoke the plan and code workflows yourself with `--seat
 
 ## Removal
 
-Run `npx --yes github:ahmed-hassan19/cross-debate scope disable --cwd "/path/to/project"` for each attached clone first. If a candidate is active, finish it or explicitly waive it before disabling. Linked worktrees share enrollment.
+If you need automatic reviews off before removing the hooks, run `npx --yes github:ahmed-hassan19/cross-debate scope disable --cwd "/path/to/project"` for each clone. If a candidate is active, finish it or explicitly waive it before disabling. Linked worktrees share the opt-out.
 
 Then close your agent sessions and remove the following entries in your editor. Preserve unrelated settings; do not restore a whole old settings backup over newer edits.
 

@@ -12,22 +12,34 @@
 Cross-agent review for plans, code, and pull requests.
 Your coding agent coordinates two reviewers, verifies findings in plan and code workflows, and asks before pushing.
 
+**Cross Debate workflows require a Git repository.** Explicit plan reviews are an exception; non-Git directories do not receive automatic reviews.
+
 ## Install
 
-You need macOS or Linux, **Node 22+**, Git, and at least one signed-in reviewer CLI on `PATH`: `claude`, `codex`,
+You need macOS or Linux, **Node 22+**, a Git repository for automatic reviews, and at least one signed-in reviewer CLI on `PATH`: `claude`, `codex`,
 or `opencode`. One CLI is supported; identical reviewer choices limit model diversity.
 GitHub PR reviews also need authenticated `gh`.
 
-Run in your own terminal, from your project's directory:
+Run in your own terminal from any directory:
 
 ```sh
 npx --yes github:ahmed-hassan19/cross-debate
 ```
 
-Choose your hosts and reviewers, opt into automatic reviews for this project, and confirm **Apply these changes**.
-The skill and hooks install globally; each project enrolls separately. Reviews consume your reviewer-provider usage.
+Choose your hosts and reviewers, then confirm **Apply these changes**. The skill and hooks install globally.
+Automatic reviews run in every Git project by default and consume reviewer-provider usage; use `scope disable`
+to opt out a repository and its linked worktrees. Updating activates existing Git projects unless they already
+have an explicit opt-out.
 The installer preserves unrelated settings and backs up replaced entries.
 Restart your agent. In Codex, review and accept the hook-trust prompt.
+
+Reviewer 1 finds possible code issues. Reviewer 2 challenges them and can add missed issues; both review plans
+independently. Choose different CLI or model families when available. Model menus start with **CLI default**,
+show at most one catalog suggestion per family plus your existing choice, and end with **Enter another model**.
+OpenCode uses `provider/model`. Claude uses the [Models API](https://platform.claude.com/docs/en/api/models/list)
+only with an existing `ANTHROPIC_API_KEY`, otherwise aliases; Codex uses its
+[local app-server catalog](https://developers.openai.com/siwc/token-sharing-open-source/codex-app-server).
+Discovery starts no review turn and does not verify account access.
 
 ## Verify
 
@@ -37,12 +49,12 @@ Run from your project, replacing `codex` with `claude`, `cursor`, or `opencode` 
 npx --yes github:ahmed-hassan19/cross-debate setup doctor --agent codex
 ```
 
-Expect reviewer bindings, project enrollment, and installed hook definitions. Sign-in, native hook trust,
+Expect reviewer bindings, Git default or explicit opt-out status, and installed hook definitions. Sign-in, native hook trust,
 and interactive execution remain manual checks. [Repair setup](docs/setup.md#troubleshooting) if a check fails.
 
 ## Your first review
 
-In an enrolled Claude Code or Codex project, enter plan mode and describe a small task:
+In a Git project using Claude Code or Codex, enter plan mode and describe a small task:
 
 ```text
 Plan a regression test for the bug we just fixed.
@@ -53,7 +65,7 @@ any findings. After you approve the plan, implementation ends with a reviewed lo
 Confirmed blockers are fixed before completion. Pushing requires your approval of the exact commit and destination.
 A failed, waived, or changed-after-review result is disclosed; completion alone does not mean review passed.
 
-To request a plan review explicitly, including in Cursor, OpenCode, or an unenrolled project:
+To request a plan review explicitly, including in Cursor, OpenCode, or an opted-out project:
 
 ```text
 Use cross-debate to review this plan.

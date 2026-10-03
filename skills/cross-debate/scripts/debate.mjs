@@ -14,6 +14,7 @@ Usage:
   debate.mjs hook <agent> <event>     host hook dispatcher (JSON payload on stdin)
 
 Environment: DEBATE_HOME (default ~/.local/share/debate), DEBATE=off, DELEGATE_SKILLS_DIR. --help never launches a model.
+Automatic reviews are on in Git repositories by default; scope disable opts out a repository and linked worktrees.
 `;
 
 function shared(argv) {

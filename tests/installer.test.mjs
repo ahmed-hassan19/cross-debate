@@ -29,7 +29,7 @@ beforeEach(() => {
     XDG_CONFIG_HOME: path.join(home, '.config'), DEBATE_HOME: path.join(home, 'state'),
     GIT_CONFIG_GLOBAL: '/dev/null', GIT_CONFIG_SYSTEM: '/dev/null', PATH: path.join(home, 'bin') });
   for (const cli of ['claude', 'codex']) {
-    write(path.join(home, 'bin', cli), '#!/bin/sh\nprintf called > "$HOME/cli-called"\nexit 99\n');
+    write(path.join(home, 'bin', cli), '#!/bin/sh\nif [ "$1" != "app-server" ]; then printf called > "$HOME/cli-called"; fi\nexit 99\n');
     fs.chmodSync(path.join(home, 'bin', cli), 0o755);
   }
   fs.symlinkSync(git, path.join(home, 'bin', 'git'));
@@ -46,23 +46,37 @@ afterEach(() => {
 });
 
 test('cancelling at the Apply prompt leaves the fresh home untouched', async () => {
-  let cancelled = '';
+  let cancelled = '', confirms = 0;
   const ui = { intro() {}, note() {}, outro() {}, log: { info() {} }, isCancel: () => false,
-    multiselect: async () => ['claude', 'codex'], select: async () => 'default', confirm: async () => false,
+    multiselect: async () => ['claude', 'codex'], select: async () => 'default', confirm: async () => { confirms++; return false; },
     cancel: message => { cancelled = message; } };
   assert.equal(await install(ui, home), 0);
+  assert.equal(confirms, 1, 'Apply is the only confirmation; there is no project enrollment prompt');
   assert.match(cancelled, /Cancelled/);
   assert.deepEqual(fs.readdirSync(home), ['bin']);
 });
 
-test('install merges settings and comments; repeat installation preserves hooks and project enrollment', () => {
+test('installer summary explains default-on usage and preserves an existing project opt-out', async () => {
+  assert.equal(spawnSync(git, ['init', '-q', home]).status, 0);
+  assert.equal(spawnSync(git, ['-C', home, 'config', '--local', 'debate.enabled', 'false']).status, 0);
+  const notes = [];
+  const ui = { intro() {}, outro() {}, log: { info() {} }, isCancel: () => false,
+    note: message => notes.push(message), multiselect: async () => ['claude', 'codex'], select: async () => 'default',
+    confirm: async () => true, cancel: message => assert.fail(message) };
+  assert.equal(await install(ui, home), 0);
+  assert.match(notes.join('\n'), /Automatic reviews run in every Git project by default and consume reviewer-provider usage/);
+  assert.match(notes.join('\n'), /explicit opt-out/);
+  assert.equal(spawnSync(git, ['-C', home, 'config', '--local', '--get', 'debate.enabled'], { encoding: 'utf8' }).stdout.trim(), 'false');
+});
+
+test('install merges settings and comments; repeat installation preserves hooks and Git default', () => {
   const unrelated = { hooks: [{ type: 'command', command: 'other-tool' }] };
   write(settings, JSON.stringify({ theme: 'dark', hooks: { Stop: [unrelated] }, permissions: { allow: ['Bash(git status)'], deny: ['Read(secret)'] } }));
   write(hooks, JSON.stringify({ hooks: { Stop: [unrelated] } }));
   write(config, JSON.stringify(fleet));
   write(toml, '# user config\nmodel = "chosen"\n[features]\nother = true\nhooks = false # hook preference\n[sandbox_workspace_write]\nwritable_roots = ["/work"] # existing roots\n');
   assert.equal(spawnSync(git, ['init', '-q', home]).status, 0);
-  applyInstall(plan({ attach: true }));
+  applyInstall(plan());
   const version = JSON.parse(read(path.resolve('package.json'))).version;
   assert.equal(read(path.join(target, 'VERSION')).trim(), version);
   const installedVersion = spawnSync(process.execPath, [path.join(target, 'scripts/debate.mjs'), '--version'], { encoding: 'utf8' });
@@ -78,9 +92,9 @@ test('install merges settings and comments; repeat installation preserves hooks 
   assert.deepEqual(parsed.sandbox_workspace_write.writable_roots, ['/work', process.env.DEBATE_HOME]);
   for (const comment of ['# user config', '# hook preference', '# existing roots']) assert.ok(read(toml).includes(comment));
   const first = [settings, hooks, toml].map(read);
-  const again = plan({ attach: true }); assert.equal(again.attach, false); applyInstall(again);
+  const again = plan(); applyInstall(again);
   assert.deepEqual([settings, hooks, toml].map(read), first);
-  assert.equal(spawnSync(git, ['-C', home, 'config', '--local', '--get', 'debate.enabled'], { encoding: 'utf8' }).stdout.trim(), 'true');
+  assert.equal(spawnSync(git, ['-C', home, 'config', '--local', '--get', 'debate.enabled'], { encoding: 'utf8' }).status, 1);
 });
 
 test('command help works before installation without changing settings or calling reviewers', () => {
@@ -198,7 +212,7 @@ test('the summary shows effective trusted project reviewers, including a replace
 });
 
 test('custom reviewers validate model input and persist models and reasoning effort', async () => {
-  const selections = ['custom', 'codex', 'claude'];
+  const selections = ['custom', 'codex', 'other', 'claude', 'other'];
   const answers = ['example-codex', 'high', 'example-claude', 'medium'];
   const ui = { intro() {}, note() {}, outro() {}, log: { info() {} }, isCancel: () => false,
     multiselect: async () => ['codex'], select: async () => selections.shift(), confirm: async () => true,
@@ -214,23 +228,18 @@ test('custom reviewers validate model input and persist models and reasoning eff
 for (const host of ['claude', 'codex', 'cursor', 'opencode']) test(`${host} wizard explains scope and usage before Apply and provides a runnable handoff`, async () => {
   assert.equal(spawnSync(git, ['init', '-q', home]).status, 0);
   const notes = [];
-  const attached = ['claude', 'codex'].includes(host);
   const ui = { intro() {}, outro() {}, log: { info() {} }, isCancel: () => false,
     multiselect: async () => [host], select: async () => 'default', note: (text, title) => notes.push({ text, title }),
-    confirm: async ({ message }) => {
-      if (message.startsWith('Enable automatic')) return attached;
-      assert.match(notes.at(-1).text, /installed globally.*separate project enrollment/);
-      assert.match(notes.at(-1).text, /consume.*providers' usage/);
-      return true;
-    }, cancel: message => assert.fail(message) };
+    confirm: async () => { assert.match(notes.at(-1).text, /Automatic reviews run in every Git project by default and consume reviewer-provider usage/); return true; },
+    cancel: message => assert.fail(message) };
   assert.equal(await install(ui, home), 0);
   const next = notes.find(note => note.title === 'Next').text;
   assert.match(next, /Installed cross-debate 0\.1\.0/);
-  assert.ok(next.includes(`Project: ${attached ? 'attached' : 'not attached'}`));
+  assert.match(next, /Current directory: Git repository; automatic reviews on/);
   assert.match(next, /First review prompt: Use cross-debate/);
   assert.match(next, /Restart your agent/);
   if (host === 'codex') assert.match(next, /trust the new hooks/);
-  if (!attached) assert.match(next, /request reviews explicitly; experimental hooks gate Git only/);
+  if (host === 'cursor' || host === 'opencode') assert.match(next, /request reviews explicitly; experimental hooks gate Git only/);
   const hostHome = host === 'opencode' ? path.join(home, '.config/opencode') : path.join(home, `.${host}`);
   const installed = path.join(hostHome, 'skills/cross-debate/scripts/debate.mjs');
   assert.ok(next.includes(`node ${shellQuote(installed)} setup doctor --agent ${host}`));
@@ -250,12 +259,12 @@ test('handoff reports disabled automation and safely quotes a shell-sensitive pr
     note: (text, title) => notes.push({ text, title }), cancel: message => assert.fail(message) };
   assert.equal(await install(ui, repo), 0);
   const next = notes.find(note => note.title === 'Next').text;
-  assert.match(next, /attached; automatic guards inactive/);
+  assert.match(next, /Git repository; automatic reviews off/);
   assert.doesNotMatch(next, /reviews run automatically/);
   const command = next.split('\n').find(line => line.startsWith('node '));
   const result = spawnSync('/bin/sh', ['-c', command], { encoding: 'utf8' });
   assert.equal(result.status, 0, result.stderr);
-  assert.match(result.stdout, /project enrollment: enrolled; automatic guards inactive/);
+  assert.match(result.stdout, /automatic reviews: on: Git default \(session off\)/);
 });
 
 test('Codex merge handles dotted keys and inline features, rejecting unsupported inline roots', () => {

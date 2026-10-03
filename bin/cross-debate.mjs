@@ -8,8 +8,9 @@ import { spawnSync } from 'node:child_process';
 import * as p from '@clack/prompts';
 import { initSync, parse, edit } from '@rainbowatcher/toml-edit-js';
 import { hookEntries, mergeHooks, opencodePlugin, buildLane, reviewerReadiness } from '../skills/cross-debate/scripts/setup.mjs';
-import { SKILL_DIR, debateHome, repositoryScope, changeRepositoryScope, writeAtomic, skillVersion, shellQuote } from '../skills/cross-debate/scripts/lib/common.mjs';
+import { SKILL_DIR, debateHome, repositoryScope, writeAtomic, skillVersion, shellQuote } from '../skills/cross-debate/scripts/lib/common.mjs';
 import { globalConfigPath, parseConfigDocument } from '../skills/cross-debate/vendor/delegate-skills/delegate-setup/scripts/config.mjs';
+import { discoverModelCatalog, modelMenu } from '../skills/cross-debate/scripts/lib/model-catalog.mjs';
 
 const labels = { claude: 'Claude Code', codex: 'Codex', cursor: 'Cursor (experimental)', opencode: 'OpenCode (experimental)' };
 const reviewerCLIs = ['claude', 'codex', 'opencode'];
@@ -83,7 +84,7 @@ function laneError(lane) {
 }
 
 /** Build every file change before the single Apply prompt. No discovery command writes to agent homes. */
-export function prepareInstall({ hosts, config, configBefore, cwd = process.cwd(), attach = false }) {
+export function prepareInstall({ hosts, config, configBefore, cwd = process.cwd() }) {
   if (!hosts.length || hosts.some(host => !Object.hasOwn(labels, host))) throw new Error('Choose a supported host');
   const parsed = parseConfigDocument(json(config));
   if (!parsed.ok) throw new Error(parsed.error);
@@ -136,9 +137,7 @@ export function prepareInstall({ hosts, config, configBefore, cwd = process.cwd(
     if (retainedHosts.length && slot(legacy) === slot(sharedLegacy)) continue;
     if (stat(legacy) && ownedSkill(legacy)) add(legacy, 'compat', target);
   }
-  const scope = repositoryScope(cwd);
-  if (attach && !scope.identity) throw new Error('Project attachment requires a Git worktree');
-  return { changes, cwd, attach: attach && !scope.configured, target, retainedHosts };
+  return { changes, cwd, target, retainedHosts };
 }
 
 /** Back up entries themselves (never symlink referents); restore files if applying fails. */
@@ -173,7 +172,6 @@ export function applyInstall(plan) {
         }
       }
     }
-    if (plan.attach && !repositoryScope(plan.cwd).configured) changeRepositoryScope(plan.cwd, true);
   } catch (error) {
     for (const { file, backup, previous } of applied.reverse()) {
       try {
@@ -198,6 +196,7 @@ export async function install(ui = p, cwd = process.cwd()) {
     return answer;
   };
   ui.intro('cross-debate · Cross-agent review for plans, code, and pull requests');
+  ui.note('Reviewer 1 finds possible code issues. Reviewer 2 challenges those findings and can add missed issues. Both review plans independently. Choose different CLIs or model families when available.', 'Reviewer roles');
   try {
     if (!onPath('git')) throw new Error('Install Git, then rerun cross-debate.');
     const available = reviewerCLIs.filter(onPath);
@@ -227,13 +226,25 @@ export async function install(ui = p, cwd = process.cwd()) {
           message: `Reviewer ${i + 1}`, options: available.map(value => ({ value, label: labels[value] })), initialValue: available[i % available.length],
         }) : available[i % Math.min(2, available.length)];
         let model = 'default';
-        if (choice === 'custom' || implementer === 'opencode') model = await ask('text', {
-          message: `${labels[implementer]} model${implementer === 'opencode' ? ' (provider/model)' : ' (Enter for CLI default)'}`,
-          defaultValue: implementer === 'opencode' ? undefined : 'default',
-          validate: value => implementer === 'opencode' && !/^[^/\s]+\/\S+$/.test(value || '')
+        if (implementer === 'opencode') model = await ask('text', {
+          message: 'OpenCode model (provider/model)',
+          validate: value => !/^[^/\s]+\/\S+$/.test(value || '')
             ? 'Enter the provider/model ID from your OpenCode configuration'
-            : laneError(buildLane({ implementer, model: value || 'default' })),
+            : laneError(buildLane({ implementer, model: value })),
         });
+        else if (choice === 'custom') {
+          const existing = current.lanes[i === 0 ? 'review-main' : 'review-debate'];
+          const catalog = await discoverModelCatalog(implementer);
+          const selection = await ask('select', {
+            message: `${labels[implementer]} model (catalog suggestions; access is not verified)`,
+            options: modelMenu(implementer, catalog, existing?.implementer === implementer ? existing.model : null),
+            initialValue: 'default',
+          });
+          model = selection === 'other' ? await ask('text', {
+            message: 'Enter another model ID',
+            validate: value => laneError(buildLane({ implementer, model: value || '' })),
+          }) : selection;
+        }
         const dial = implementer === 'opencode' ? 'variant' : 'effort';
         const value = choice === 'custom' ? await ask('text', {
           message: `${labels[implementer]} ${dial} (Enter for CLI default)`, defaultValue: 'none',
@@ -248,12 +259,9 @@ export async function install(ui = p, cwd = process.cwd()) {
     if (choice === 'custom') for (const name of Object.keys(config.lanes).filter(n => n.startsWith('plan-main-'))) config.lanes[name] = pair[1];
     const describe = lane => [lane.implementer, lane.model || 'CLI default', lane.effort || lane.variant].filter(Boolean).join(' / ') + (lane.source === 'project' ? ' (project override)' : '');
     const scope = repositoryScope(cwd);
-    const attach = scope.identity && !scope.configured ? await ask('confirm', {
-      message: `Enable automatic reviews in ${scope.identity.worktreeRoot} (including linked worktrees)?`, initialValue: true,
-    }) : false;
     const readiness = await reviewerReadiness(cwd, { globalConfig: config, seats: hosts });
     if (!readiness.ok) throw new Error(readiness.checks.filter(check => !check.ok).map(check => check.error).join('\n'));
-    const plan = prepareInstall({ hosts, config, configBefore, cwd, attach });
+    const plan = prepareInstall({ hosts, config, configBefore, cwd });
     const lanes = readiness.lanes;
     const compact = file => file.startsWith(`${os.homedir()}/`) ? `~/${file.slice(os.homedir().length + 1)}` : file;
     const repeat = (a, b) => a.implementer === b.implementer && a.model === b.model;
@@ -261,15 +269,15 @@ export async function install(ui = p, cwd = process.cwd()) {
       .map(h => `${labels[h]}: both plan reviewers use the same CLI and model.`);
     if (repeat(lanes['review-main'], lanes['review-debate'])) warnings.push('Both code reviewers use the same CLI and model.');
     ui.note([
-      'The skill and host hooks are installed globally. Automatic reviews require separate project enrollment.',
-      'Review sessions consume your configured reviewer providers\' usage.',
       `Hosts: ${hosts.map(h => labels[h]).join(', ')}`,
       `Plan reviewers: ${describe(lanes['plan-main'])} → ${describe(lanes['plan-debate'])}`,
       `Code reviewers: ${describe(lanes['review-main'])} → ${describe(lanes['review-debate'])}`,
       ...hosts.filter(h => lanes[`plan-main-${h}`]).map(h => `${labels[h]} first plan reviewer: ${describe(lanes[`plan-main-${h}`])}`),
       ...warnings,
       ...(plan.retainedHosts.length ? [`Keeping the legacy debate registration for ${plan.retainedHosts.join(', ')}. Select those hosts on a later run to finish migration.`] : []),
-      `Project: ${scope.configured ? 'already attached' : attach ? compact(scope.identity.worktreeRoot) : 'attach later'}`,
+      `Current directory: ${scope.identity ? `${compact(scope.identity.worktreeRoot)} (${scope.warnings.length ? scope.warnings.join('; ') : scope.enabled ? 'automatic reviews on' : 'explicit opt-out'})` : 'not a Git repository; no automatic reviews here'}`,
+      'Automatic reviews run in every Git project by default and consume reviewer-provider usage.',
+      'Updating activates existing Git projects unless they already have an explicit opt-out.',
       '', 'Files to install or update:', ...plan.changes.map(change => compact(change.file)),
       '', 'Existing entries are backed up. Reviewer sign-in is not checked.',
     ].join('\n'), 'Ready to install');
@@ -277,17 +285,16 @@ export async function install(ui = p, cwd = process.cwd()) {
     const backup = applyInstall(plan);
     if (backup) ui.log.info(`Backups: ${backup}`);
     const automaticHosts = hosts.filter(host => host === 'claude' || host === 'codex');
-    const attached = scope.configured || attach;
     const effective = repositoryScope(cwd).effective;
     ui.note([
       `Installed cross-debate ${version} for ${hosts.map(host => labels[host]).join(', ')}.`,
-      `Project: ${attached ? `attached; automatic guards ${effective ? 'enabled' : 'inactive (automation disabled)'}` : 'not attached; explicit reviews only'}.`,
+      `Current directory: ${scope.identity ? `Git repository; automatic reviews ${effective ? 'on' : 'off'}` : 'not a Git repository; no automatic reviews'}.`,
       'Restart your agent to load cross-debate.',
       ...(hosts.includes('codex') ? ['In Codex, review and trust the new hooks when prompted.'] : []),
       'Verify from your project directory:',
       ...hosts.map(host => `node ${shellQuote(path.join(homes[host], 'skills', 'cross-debate', 'scripts', 'debate.mjs'))} setup doctor --agent ${host} --cwd ${shellQuote(cwd)}`),
-      ...(!attached ? [`To attach a project: ${installCommand} scope enable --cwd /path/to/project`] : []),
       ...(effective && automaticHosts.length ? [`In ${automaticHosts.map(host => labels[host]).join(' and ')}, enter plan mode and describe your task. Plan and code reviews run automatically.`] : []),
+      ...(scope.identity ? ['Use scope disable --cwd /path/to/project to opt out; scope enable reverses it.'] : []),
       'First review prompt: Use cross-debate to review a plan for adding a small regression test in this project.',
       ...(hosts.some(host => host === 'cursor' || host === 'opencode') ? ['Cursor/OpenCode: request reviews explicitly; experimental hooks gate Git only.'] : []),
       'Expect reviewer findings, the agent\'s verified decisions, and a review outcome. Sign-in and native hook execution still need an interactive check.',
@@ -317,8 +324,9 @@ Install or update:
 Other commands:
   ${installCommand} <command>
 
-  scope enable                Attach the current Git project
-  scope status                Check project enrollment
+  scope enable                Re-enable automatic reviews in this Git project
+  scope disable               Opt this Git project and linked worktrees out
+  scope status                Check automatic review status
   setup doctor --agent codex  Check one host (or claude, cursor, opencode)
   review <PR URL> --dry-run    Run models without posting the PR review
 

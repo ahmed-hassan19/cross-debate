@@ -7,7 +7,7 @@ Commands use your seat (`claude`, `codex`, `cursor` or `opencode`) and a stable 
 Claude and Codex use the hook-provided ID; Cursor and OpenCode choose and reuse one as described in [operations](operations.md#hosts).
 `<cross-debate-dir>` and the scope rules are defined in the skill's SKILL.md. Outside automatic scope, invoke only on
 explicit request; approval requirements still apply even though automatic review and permit guards are inactive.
-The `review` subcommand ([review](review.md)) is the backend; explicit review requests do not require enrollment.
+The `review` subcommand ([review](review.md)) is the backend; explicit review requests work outside automatic scope.
 For scope, dirty artifacts, recovery, or hook verification, read [operations](operations.md).
 
 **Execution rule.** Claude runs `code review` as a Bash call with `run_in_background: true` and, when it
@@ -31,7 +31,7 @@ completes, reads the result with `code wait --run "<run>" --max-wait 1s`. Every 
 
 2. If you made several unpublished commits this session, squash them to one commit before begin:
    git reset --soft "<before-change-sha>"   then   git commit -m "<type>: <description>"
-   Then use begin --adopt below; adoption accepts only one commit with the base as its sole parent.
+   Then use begin --adopt below; adoption accepts a root commit or one commit with the base as its sole parent.
    Otherwise start a fresh candidate before committing:
    node "<cross-debate-dir>/scripts/debate.mjs" code begin --seat "<seat>" --session "<session>" --cwd "<cwd>"
    Default base is current HEAD, not the session's original baseline. Retain the returned runId.
@@ -40,6 +40,7 @@ completes, reads the result with `code wait --run "<run>" --max-wait 1s`. Every 
    git commit -m "<type>: <description>"
    If the candidate was already committed without begin, adopt only that unpublished HEAD:
    node "<cross-debate-dir>/scripts/debate.mjs" code begin --seat "<seat>" --session "<session>" --cwd "<cwd>" --adopt --base "<sole-parent-sha>" --reason "<evidence it is unpublished>"
+   For a root commit, omit --base; the workflow reviews it against Git's empty tree.
    Use your observed commit-without-push history or explicit user confirmation as evidence.
    If publication status is unknown, ask the user before adoption; do not infer it from stale remote refs.
    A parent mismatch must be resolved explicitly; do not rewrite earlier commits to make adoption pass.
@@ -47,7 +48,7 @@ completes, reads the result with `code wait --run "<run>" --max-wait 1s`. Every 
 3. If Stop reports no session baseline, explicitly register the known before-change commit:
    node "<cross-debate-dir>/scripts/debate.mjs" code baseline --seat "<seat>" --session "<session>" --cwd "<cwd>" --base "<before-change-sha>" --reason "<basis for this baseline>"
    HEAD is acceptable only when nothing changed; registration is audited.
-   For an already-created candidate, use its intended sole parent and then the adoption command.
+   For an already-created non-root candidate, use its intended sole parent and then the adoption command.
    On a promotion turn (merge, pull, or checkout of reviewed work) Stop passes on its own when HEAD moved only by
    published commits, commits receipted in any worktree of the repository, or merge commits. Otherwise register
    the promoted HEAD: baseline --base "<HEAD>" --reason "promotion: <what was merged and where it was reviewed>".

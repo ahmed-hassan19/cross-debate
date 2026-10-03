@@ -10,7 +10,7 @@ yourself, and you do not touch the PR. Standalone output has no orchestrator ver
 workflows separately require orchestrator verification. A single CLI is supported for both reviewer roles.
 
 Automatic use comes through the opted-in code workflow ([code](code.md)). Explicit requests for PR or local
-review work without repository enrollment; this command does not enroll repositories.
+review work outside automatic scope; this command does not change repository config.
 
 ## Run it
 

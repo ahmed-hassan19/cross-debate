@@ -43,6 +43,7 @@ const common = await import(path.join(SCRIPTS, 'lib', 'common.mjs'));
 const plan = await import(path.join(SCRIPTS, 'plan.mjs'));
 const code = await import(path.join(SCRIPTS, 'code.mjs'));
 const hooks = await import(path.join(SCRIPTS, 'hooks.mjs'));
+const local = await import(path.join(SCRIPTS, 'lib', 'local.mjs'));
 const recovery = await import(path.join(SCRIPTS, 'lib', 'recovery.mjs'));
 
 before(() => { common.ensureHome(HOME); });
@@ -299,11 +300,12 @@ test('scope transitions revoke approvals across worktrees, refuse active or unch
   for (const seat of ['claude', 'codex']) assert.equal(hook(seat, 'PreToolUse', hookPayload('target-test', enabled, { tool_name: 'Bash', tool_input: { command: 'git push origin main', workdir: repo } })).output, null);
 });
 
-test('repository scope defaults off, shares enrollment across worktrees, and retains explicit session bookkeeping', () => {
+test('repository scope defaults on, and explicit opt-out applies to linked worktrees', () => {
   const repo = makeRepo(undefined, { enrolled: false });
   assert.equal(common.repositoryScope(repo).configured, null);
-  assert.equal(common.repositoryScope(repo).enabled, false);
+  assert.equal(common.repositoryScope(repo).enabled, true);
   assert.equal(common.repositoryScope(SCRATCH).enabled, false);
+  assert.equal(cli('scope', ['disable', '--cwd', repo]).status, 0);
   for (const seat of ['claude', 'codex']) {
     const sid = `scope-${seat}`;
     const payload = hookPayload(sid, repo, { permission_mode: 'plan', last_assistant_message: '<proposed_plan>unreviewed</proposed_plan>' });
@@ -332,7 +334,7 @@ test('repository scope defaults off, shares enrollment across worktrees, and ret
   assert.match(invalid.warnings[0], /defaulting to disabled/);
 });
 
-test('fresh init and clones of enrolled repositories default off', () => {
+test('fresh init and clones of enabled repositories default on', () => {
   const fresh = path.join(SCRATCH, 'fresh-init');
   fs.mkdirSync(fresh);
   gitc(fresh, 'init', '-q');
@@ -343,9 +345,51 @@ test('fresh init and clones of enrolled repositories default off', () => {
     const scope = common.repositoryScope(repo);
     assert.notEqual(scope.identity, null);
     assert.equal(scope.configured, null);
-    assert.equal(scope.effective, false);
+    assert.equal(scope.effective, true);
   }
   assert.equal(common.repositoryScope(seed).enabled, true);
+});
+
+test('an unborn Git session reviews its root commit and can approve that commit for push', () => {
+  const repo = path.join(SCRATCH, 'root-candidate');
+  fs.mkdirSync(repo);
+  gitc(repo, 'init', '-q', '-b', 'main');
+  gitc(repo, 'config', 'user.email', 'test@example.com');
+  gitc(repo, 'config', 'user.name', 'Test');
+  const sid = 'root-session';
+  assert.equal(hook('codex', 'SessionStart', hookPayload(sid, repo)).output, null);
+  const base = common.loadLedger(HOME, common.repoIdentity(repo).repoKey).baselines[common.sessionKey('codex', sid)].headSha;
+  assert.equal(base, common.emptyTreeSha(repo));
+  const first = cli('code', ['begin', '--seat', 'codex', '--session', sid, '--cwd', repo]).json;
+  assert.equal(first.ok, true, JSON.stringify(first));
+  assert.equal(cli('code', ['waive', '--run', first.runId, '--reason', 'user approved: abandon before first commit']).json.outcome, 'abandoned');
+  assert.equal(common.loadLedger(HOME, common.repoIdentity(repo).repoKey).active, null);
+  assert.equal(cli('scope', ['disable', '--cwd', repo]).status, 0);
+  assert.equal(cli('scope', ['enable', '--cwd', repo]).status, 0);
+  const begun = cli('code', ['begin', '--seat', 'codex', '--session', sid, '--cwd', repo]).json;
+  assert.equal(begun.ok, true, JSON.stringify(begun));
+  fs.writeFileSync(path.join(repo, 'app.py'), 'print(1)\n');
+  const root = commitAll(repo, 'feat: root');
+  assert.equal(code.adoptionCheck(repo, { reason: 'observed local root commit' }).baseSha, base);
+  assert.equal(code.codePreflight(HOME, common.loadRun(HOME, begun.runId), { skipLanes: true }).ok, true);
+  const snapshot = local.snapshotWorkingTree(repo, { base });
+  assert.equal(snapshot.pr.emptyBase, true);
+  assert.match(gitc(snapshot.dir, 'diff', `${base}..HEAD`), /app\.py/);
+  snapshot.cleanup();
+  startCodeRoundAndAttempt(begun.runId);
+  ingestFixture(begun.runId, 'backend-clean.json');
+  const verdict = path.join(common.runDir(HOME, begun.runId), 'root-verdict.json');
+  fs.writeFileSync(verdict, JSON.stringify({ review_rating: 9, verdicts: [], contest_rulings: [], assumptions: [], missed: [], checks: [] }));
+  assert.equal(cli('code', ['verdict', '--run', begun.runId, '--round', '1', '--verdicts', verdict]).json.next, 'stop');
+  assert.equal(cli('code', ['finish', '--run', begun.runId]).json.outcome, 'passed');
+  assert.equal(hook('codex', 'Stop', hookPayload(sid, repo)).output, null);
+  const remote = path.join(SCRATCH, 'github.com', 'owner', 'root.git');
+  fs.mkdirSync(path.dirname(remote), { recursive: true });
+  gitc(SCRATCH, 'init', '--bare', '-q', remote);
+  gitc(repo, 'remote', 'add', 'origin', remote);
+  const approval = cli('code', ['approve-push', '--run', begun.runId, '--remote', 'origin', '--ref', 'refs/heads/main', '--reason', 'user approved: push root commit to origin main']).json;
+  assert.equal(approval.ok, true, JSON.stringify(approval));
+  assert.equal(approval.approval.commitSha, root);
 });
 
 test('unreadable local config read disables automation with a diagnostic', () => {
@@ -381,7 +425,7 @@ test('scope status is read-only, ignores global/system/includes, accepts Git boo
   const configPath = path.join(repo, '.git', 'config');
   const before = fs.readFileSync(configPath, 'utf8');
   const result = cli('scope', ['status', '--cwd', repo], { env: { DEBATE_HOME: isolated } });
-  assert.equal(result.json.effective, false);
+  assert.equal(result.json.effective, true);
   assert.equal(fs.existsSync(isolated), false);
   assert.equal(fs.readFileSync(configPath, 'utf8'), before);
   const global = path.join(SCRATCH, 'ignored-config');
@@ -389,10 +433,10 @@ test('scope status is read-only, ignores global/system/includes, accepts Git boo
   for (const key of ['GIT_CONFIG_GLOBAL', 'GIT_CONFIG_SYSTEM']) {
     const r = cli('scope', ['status', '--cwd', repo], { env: { [key]: global } });
     assert.equal(r.status, 0, r.stderr);
-    assert.equal(r.json.enabled, false);
+    assert.equal(r.json.enabled, true);
   }
   gitc(repo, 'config', 'include.path', global);
-  assert.equal(common.repositoryScope(repo).enabled, false);
+  assert.equal(common.repositoryScope(repo).enabled, true);
   gitc(repo, 'config', 'debate.enabled', 'yes');
   assert.equal(common.repositoryScope(repo).enabled, true);
   gitc(repo, 'config', 'debate.enabled', 'no');
@@ -418,6 +462,7 @@ test('scope status is read-only, ignores global/system/includes, accepts Git boo
 test('explicit plan and code workflows remain available without enrollment in both seats', () => {
   for (const seat of ['claude', 'codex']) {
     const repo = makeRepo(undefined, { enrolled: false });
+    common.changeRepositoryScope(repo, false, HOME);
     const sid = `explicit-unenrolled-${seat}`;
     const id = newPlanRun({ seat, sessionId: sid, cwd: repo });
     runReviewRound(id, PLAN_BODY, readFix('plan-review-round1.json'));
@@ -433,7 +478,7 @@ test('explicit plan and code workflows remain available without enrollment in bo
     for (const command of ['git commit --amend --no-edit', 'git push origin main']) {
       assert.equal(hook(seat, 'PreToolUse', { ...payload, tool_name: 'Bash', tool_input: { command } }).output, null);
     }
-    assert.equal(common.repositoryScope(repo).configured, null);
+    assert.equal(common.repositoryScope(repo).configured, false);
   }
 });
 
@@ -1326,11 +1371,11 @@ test('git gate heredocs: prose bodies with apostrophes and push: pass in both se
   for (const command of ["bash <<'EOF'\ngit push origin main\nEOF\n", 'sh <<-EOF\n\tgit push origin main\n\tEOF\n', "sudo bash -s <<EOF\ngit push origin main\nEOF\n"]) assert.equal(decide(command).decision, 'deny', command);
 });
 
-test('adoption: parent mismatch, merge and root commits, multi-commit ancestor range, known publication', () => {
+test('adoption: root commits, merge refusal, multi-commit ancestor range, known publication', () => {
   const repo = makeRepo();
   const first = gitc(repo, 'rev-parse', 'HEAD');
   // root commit
-  assert.equal(code.adoptionCheck(repo, { baseArg: null, reason: 'evidence' }).status, 'parent_mismatch');
+  assert.equal(code.adoptionCheck(repo, { baseArg: null, reason: 'evidence' }).baseSha, common.emptyTreeSha(repo));
   fs.writeFileSync(path.join(repo, 'a.txt'), 'a'); gitc(repo, 'add', '-A'); gitc(repo, 'commit', '-q', '-m', 'feat: a');
   fs.writeFileSync(path.join(repo, 'b.txt'), 'b'); gitc(repo, 'add', '-A'); gitc(repo, 'commit', '-q', '-m', 'feat: b');
   assert.equal(code.adoptionCheck(repo, { baseArg: null, reason: 'e' }).commitsInRange, 1);
@@ -2209,8 +2254,9 @@ test('delete approval: merged PR at the push destination, exact lease command, c
   assert.equal(fromDollar.ok, true, JSON.stringify(fromDollar));
   assert.equal(common.gitGateDecision({ command: fromDollar.command, cwd: SCRATCH, home: HOME }).decision, 'pass');
 
-  // unenrolled repos still record the approval, with the scope warning
+  // opted-out repos still record the approval, with the scope warning
   const plain = makeRepo(undefined, { enrolled: false });
+  common.changeRepositoryScope(plain, false, HOME);
   gitc(plain, 'remote', 'add', 'origin', fork);
   const unenrolled = approveDelete({}, { FAKE_GH_JSON: prJson({ headRefOid: moved }) }, plain).json;
   assert.equal(unenrolled.ok, true, JSON.stringify(unenrolled));

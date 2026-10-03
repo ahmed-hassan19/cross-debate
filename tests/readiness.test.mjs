@@ -109,29 +109,19 @@ test('selected-host doctor checks only its effective plan lane and hook definiti
   assert.match(invalid.stdout, /--agent must be/);
 });
 
-test('doctor reports enrollment and Codex manual settings without parsing TOML', () => {
+test('doctor reports Git default and Codex manual settings without parsing TOML', () => {
   write(path.join(home, '.codex/config.toml'), 'deliberately invalid TOML');
   let result = doctor('--agent', 'codex');
   assert.equal(result.status, 0, result.stderr);
-  assert.match(result.stdout, /project enrollment: not enrolled; automatic guards inactive/);
-  assert.match(result.stdout, /scope enable --cwd/);
+  assert.match(result.stdout, /automatic reviews: on: Git default/);
   assert.match(result.stdout, /does not parse config.toml or verify native trust/);
   assert.match(result.stdout, /features.hooks = true.*sandbox_workspace_write.writable_roots/);
   assert.ok(result.stdout.includes(process.env.DEBATE_HOME));
   assert.equal(spawnSync(git, ['-C', repo, 'config', '--local', 'debate.enabled', 'true']).status, 0);
   result = doctor('--agent', 'codex');
-  assert.match(result.stdout, /project enrollment: enrolled; automatic guards active/);
-  assert.doesNotMatch(result.stdout, /attach project:/);
+  assert.match(result.stdout, /automatic reviews: on: explicitly enabled/);
+  assert.equal(spawnSync(git, ['-C', repo, 'config', '--local', 'debate.enabled', 'false']).status, 0);
+  assert.match(doctor('--agent', 'codex').stdout, /automatic reviews: off: explicit project opt-out/);
   result = doctor('--agent', 'codex', '--cwd', home);
-  assert.match(result.stdout, /outside Git; explicit reviews only/);
-});
-
-test('doctor attachment command preserves shell-sensitive paths', () => {
-  const renamed = `${repo} 'quoted' $(false)`;
-  fs.renameSync(repo, renamed); repo = renamed;
-  fs.symlinkSync(process.execPath, path.join(home, 'bin/node'));
-  const command = doctor('--agent', 'claude').stdout.split('\n').find(line => line.includes('attach project:')).split('in your terminal: ')[1];
-  const result = spawnSync('/bin/sh', ['-c', command], { encoding: 'utf8' });
-  assert.equal(result.status, 0, result.stderr);
-  assert.equal(JSON.parse(result.stdout).enabled, true);
+  assert.match(result.stdout, /automatic reviews: off: not a Git repository/);
 });
