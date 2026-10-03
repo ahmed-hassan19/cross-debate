@@ -1,7 +1,7 @@
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { debateHome } from '../skills/cross-debate/scripts/lib/common.mjs';
+import { debateHome, isMainModule } from '../skills/cross-debate/scripts/lib/common.mjs';
 
 const object = value => value !== null && typeof value === 'object' && !Array.isArray(value);
 const text = value => typeof value === 'string' && value.length > 0;
@@ -185,4 +185,93 @@ export function aggregateHistory(history) {
       sourceFindingOccurrences: standalone.reduce((n, r) => n + (r.stages.main?.doc.findings.length || 0) + (r.stages.debate?.doc.new_findings?.length || 0), 0),
       finalDispositions: distribution(finalFindings.map(f => f.status), ['agreed', 'contested', 'withdrawn']),
       recordedStageSeconds: measure(stages.map(s => s.seconds)), wallElapsedSeconds: measure(standalone.map(elapsed)), orchestratorVerdicts: 0 } };
+}
+
+const HELP = `Usage: node scripts/history-report.mjs [--home <dir>] [--review-cache <dir>]
+       [--archive <dir> ...] [--format json|markdown]
+
+Read-only, dependency-free maintainer report. No models or network requests.
+Defaults: DEBATE_HOME or ~/.local/share/debate; ~/.cache/debate-review; Markdown to stdout.
+Current home: runs/*/run.json and stats.jsonl. Each explicit archive: runs/*/run.json,
+stats.jsonl and stats.jsonl.bak. No archives are scanned by default.
+Cache: <owner>__<repo>/<pr>/<sha12>/run.json or local/<repo>/<branch>/<sha12>/run.json.
+Excludes clones/, deeper files, symlinks, and custom --out-dir locations outside these layouts.
+Raw wins over stats; current wins over archives within each class; later archive arguments win ties.
+Within one root stats.jsonl wins over .bak; within a file the last row for a runId wins.
+Use frozen inputs to reproduce a snapshot. Output contains aggregate metadata only.
+`;
+const display = value => value === null ? 'unreported' : String(Math.round(value * 10000) / 10000);
+const counts = values => Object.entries(values).filter(([, value]) => value).map(([key, value]) => `${key}: ${value}`).join('; ') || 'none';
+const table = (headings, rows) => [headings, headings.map(() => '---'), ...rows].map(row => `| ${row.join(' | ')} |`).join('\n');
+export function renderMarkdown(report) {
+  const cohorts = Object.entries(report.workflows), c = report.coverage, s = report.standalone;
+  const metrics = [
+    ['Raw workflow runs', r => r.runs], ['Runs with verdicts', r => r.runsContaining.withVerdicts],
+    ['Rounds', r => r.rounds.total ?? 0], ['Attempts / failures', r => `${r.attempts} / ${r.failedAttempts}`],
+    ['Runs with failed attempts', r => r.runsContaining.withFailures], ['Finding occurrences / adjudicated', r => `${r.findings.occurrences} / ${r.findings.adjudicated}`],
+    ['Confirm / modify / discard', r => `${r.findings.confirm} / ${r.findings.modify} / ${r.findings.discard}`],
+    ['Runs with accepted findings', r => r.runsContaining.withAcceptedFindings], ['Accepted blocking occurrences / runs', r => `${r.findings.acceptedBlocking} / ${r.runsContaining.withAcceptedBlocking}`],
+    ['Recorded fixed occurrences / runs', r => `${r.findings.recordedFixed} / ${r.runsContaining.withRecordedFixes}`],
+    ['Recorded blocking fixes / runs', r => `${r.findings.recordedFixedBlocking} / ${r.runsContaining.withRecordedBlockingFixes}`],
+    ['Backend-agreed occurrences discarded', r => r.findings.agreedDiscarded],
+    ['Unadjudicated findings / unmatched verdicts', r => `${r.findings.unadjudicated} / ${r.findings.unmatchedVerdicts}`],
+  ];
+  const timing = cohorts.flatMap(([name, r]) => [[`${name}: recorded attempt seconds`, r.recordedAttemptSeconds], [`${name}: wall elapsed seconds`, r.wallElapsedSeconds]]);
+  timing.push(['standalone: recorded stage seconds', s.recordedStageSeconds], ['standalone: wall elapsed seconds', s.wallElapsedSeconds]);
+  const measurement = rows => table(['Measurement', 'Recorded / eligible', 'Missing', 'Total', 'Median'],
+    rows.map(([name, m]) => [name, `${m.recorded} / ${m.eligible}`, m.missing, display(m.total), display(m.median)]));
+  return [
+    '# Recorded review outcomes',
+    `Dataset start range (UTC): ${report.dataset.earliestStart || 'unreported'} to ${report.dataset.latestStart || 'unreported'}; ${report.dataset.startsRecorded} recorded starts.`,
+    'One maintainer\'s changing workflows. These are recorded outcomes, not a benchmark against another method.',
+    '## Source coverage',
+    table(['Selected source', 'Records'], Object.entries(c.selected)),
+    `${c.inputFiles} metadata files read; ${c.validRawRecords} valid raw records, ${c.validStatsRecords} valid stats rows, ${c.validStandaloneRecords} valid standalone records before reconciliation.`,
+    `${c.duplicateRawRecords} duplicate raw records; ${c.duplicateStatsRecords} duplicate stats rows; ${c.statsShadowedByRaw} stats records replaced by raw records; ${c.auditRowsIgnored} audit rows excluded.`,
+    `${c.malformedRecords} malformed and ${c.unsupportedRecords} unsupported records; ${c.symlinksSkipped} symlinks skipped.`,
+    `Stats-only coverage: ${report.statsOnly.runs} runs (${counts(report.statsOnly.kinds)}). These lack raw finding joins and are excluded from the workflow tables.`,
+    '## Workflow occurrences',
+    table(['Metric', 'Plan', 'Code'], metrics.map(([name, get]) => [name, ...cohorts.map(([, r]) => get(r))])),
+    ...cohorts.map(([name, r]) => `${name}: recorded statuses: ${counts(r.statuses)}. Recorded outcomes: ${counts(r.outcomes)}.\n\n${name}: review states: ${counts(r.reviewStates)}. Attempt states: ${counts(r.attemptStatuses)}.`),
+    'Each occurrence is identified by (runId, round, findingId) internally. Verdicts join only to findings in the same round. Confirm/modify counts as accepted; blocking uses that finding\'s recorded severity. Fixes require an accepted verdict with fixed=true. Plan change prose is not a recorded fix. Occurrences can repeat a bug across rounds; these are not unique bugs or semantic deduplication.',
+    'A finished/completed label alone does not establish successful review. Failed, waived, unfinished, blocked, and changed-after-review records remain separate. Finished-with-verdict is a coverage category, not a quality judgment.',
+    '## Time and usage coverage', measurement(timing),
+    'Attempt time is the recorded attempt.seconds field; its measurement differs across workflow versions. Wall elapsed time is finishedAt minus createdAt/startedAt and can include waiting and interruptions. These are not interchangeable. Missing or invalid values are excluded, not zero-filled.',
+    measurement(cohorts.flatMap(([name, r]) => Object.entries(r.providerReported).filter(([, v]) => object(v)).map(([field, m]) => [`${name}: provider-reported ${field}`, m]))),
+    'Usage denominators are recorded agent entries, not every possible provider call. Cost is provider-reported USD coverage, not total spend or ROI. Cache fields are already represented in provider input accounting where applicable; do not add them to input totals. No model rankings, causal comparisons, or time-saved claims are made.',
+    measurement(cohorts.flatMap(([name, r]) => Object.entries(r.orchestratorNonAdditive).map(([field, m]) => [`${name}: orchestrator ${field} (non-additive)`, m]))),
+    'Orchestrator tokens cover transcript windows and may overlap other work. They remain separate and must not be added to reviewer totals.',
+    '## Standalone cache coverage',
+    `${s.records} records: ${s.local} local and ${s.pr} PR reviews. ${s.withMainAndDebate} contain both main and debate stages; ${s.withRenderedReview} contain a rendered review; ${s.withFinishedTimestamp} have a finished timestamp. A timestamp is also written on failure and does not prove success or posting.`,
+    `${s.sourceFindingOccurrences} source finding occurrences. Final backend dispositions: ${counts(s.finalDispositions)}. Orchestrator verdicts: 0. These records do not establish accepted fixes. Provider usage is not recorded in this metadata schema.`,
+    '## Cohorts and limitations',
+    'Workflow input is `runs/*/run.json` plus `stats.jsonl`. Explicit archives also allow `stats.jsonl.bak`. Raw wins over stats, current sources win over archives within each class, later archive arguments win archive ties, stats.jsonl wins over its backup, and the last row within a file wins. Audit events, sessions, receipts, and nested code backend files are not additional runs.',
+    'Standalone input is limited to `<owner>__<repo>/<pr>/<sha12>/run.json` and `local/<repo>/<branch>/<sha12>/run.json`. clones/, arbitrary deeper files, symlinks, and custom --out-dir locations outside these layouts are excluded. Cached paths can overwrite earlier executions; absence of metadata does not prove no review occurred.',
+    'Only explicitly supplied archives are included. Private source records, prompts, narratives, identities, and paths are excluded from public output. Computation is reproducible locally from frozen metadata; readers cannot independently audit the private source records. Record the inventory cutoff beside a published snapshot.',
+    '[Regeneration and private snapshot procedure](https://github.com/ahmed-hassan19/cross-debate/blob/main/CONTRIBUTING.md#regenerating-the-field-report).',
+  ].join('\n\n') + '\n';
+}
+
+export function main(argv) {
+  const options = { archives: [] };
+  let format = 'markdown';
+  for (let i = 0; i < argv.length; i++) {
+    const flag = argv[i];
+    if (flag === '--help' || flag === '-h') { process.stdout.write(HELP); return 0; }
+    if (!['--home', '--review-cache', '--archive', '--format'].includes(flag) || !argv[i + 1] || argv[i + 1].startsWith('--')) {
+      process.stderr.write(HELP); return 2;
+    }
+    const value = argv[++i];
+    if (flag === '--format') format = value;
+    else if (flag === '--archive') options.archives.push(path.resolve(value));
+    else options[flag === '--home' ? 'home' : 'reviewCache'] = path.resolve(value);
+  }
+  if (!['json', 'markdown'].includes(format)) { process.stderr.write('format must be json or markdown\n'); return 2; }
+  const report = aggregateHistory(readHistory(options));
+  process.stdout.write(format === 'json' ? `${JSON.stringify(report, null, 2)}\n` : renderMarkdown(report));
+  return 0;
+}
+if (isMainModule(import.meta.url)) {
+  try { process.exitCode = main(process.argv.slice(2)); }
+  catch { process.stderr.write('history-report: unable to read selected metadata; check input roots and permissions\n'); process.exitCode = 1; }
 }
