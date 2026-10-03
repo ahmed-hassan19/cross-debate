@@ -4,6 +4,8 @@ Cross-agent review for plans, code, and pull requests.
 
 Your coding agent coordinates two reviewers, checks their findings, and keeps you in control of the push.
 
+**Cross Debate workflows require a Git repository.** Non-Git directories do not receive automatic reviews.
+
 - Plans get two reviews before your agent presents them.
 - Finished code gets reviewed as a local candidate commit. Pushing requires your approval of that exact commit
   and destination.
@@ -11,13 +13,13 @@ Your coding agent coordinates two reviewers, checks their findings, and keeps yo
 
 ## Install and use
 
-You need macOS or Linux, **Node 22+**, Git, and at least one signed-in reviewer CLI on `PATH`: `claude`, `codex`,
-or `opencode`. Choose different models for the two reviewers when available; using one CLI is supported.
+You need macOS or Linux, **Node 22+**, a Git repository, and at least one signed-in reviewer CLI on `PATH`: `claude`, `codex`,
+or `opencode`. Automatic reviews run in every Git project by default and consume reviewer-provider usage. Choose different CLI or model families for the two reviewers when available; using one CLI is supported.
 GitHub PR reviews and merged-branch deletion also require authenticated `gh`.
 
-### 1. Install and attach your project
+### 1. Install globally
 
-Run this from your project's directory:
+Run this from any directory:
 
 ```sh
 npx --yes github:ahmed-hassan19/cross-debate
@@ -27,23 +29,28 @@ In the installer:
 
 1. Select the agents you use, such as Claude Code or Codex.
 2. Accept the recommended reviewers, or choose two reviewers and their models.
-3. Choose **Yes** to enable automatic reviews for this project.
-4. Review the summary and confirm **Apply these changes**.
+3. Review the summary and confirm **Apply these changes**.
+
+**CLI default** is the first model choice. The installer shows at most one catalog suggestion per model family,
+your existing choice when present, and **Enter another model**. It asks for OpenCode's `provider/model` ID.
+Claude suggestions come from the [Models API](https://platform.claude.com/docs/en/api/models/list) only when `ANTHROPIC_API_KEY` is already set; otherwise it offers
+Claude Code aliases. Codex suggestions come from its [local app-server model catalog](https://developers.openai.com/siwc/token-sharing-open-source/codex-app-server). Discovery makes no inference
+request and does not verify that your account can use a listed model. The installer does not read private CLI credentials.
 
 Restart your agent. In Codex, accept the hook-trust prompt after reviewing it.
 
 ### 2. Use it
 
-Once enabled in a project, cross-debate runs automatically in Claude Code and Codex:
+In Git projects, cross-debate runs automatically in Claude Code and Codex:
 
 1. Enter plan mode and describe your task. The agent loads the skill and cross-reviews the plan before presenting it.
 2. Approve the plan and proceed with implementation. The agent reviews the code, fixes confirmed blockers,
    and asks for approval before pushing.
 
 <details>
-<summary>Manual reviews: Cursor, OpenCode, unattached projects, and pull requests</summary>
+<summary>Manual reviews: Cursor, OpenCode, opted-out projects, and pull requests</summary>
 
-In Cursor or OpenCode, or in a project without automatic reviews enabled, ask the agent to use cross-debate:
+In Cursor or OpenCode, or in a project with automatic reviews disabled, ask the agent to use cross-debate:
 
 ```text
 Use cross-debate to review this plan.
@@ -72,11 +79,11 @@ npx --yes github:ahmed-hassan19/cross-debate review --local
 | What you want | Command |
 |---|---|
 | Update the skill or choose different reviewers | `npx --yes github:ahmed-hassan19/cross-debate` |
-| Attach another project | `npx --yes github:ahmed-hassan19/cross-debate scope enable --cwd "/path/to/project"` |
+| Reverse a project opt-out | `npx --yes github:ahmed-hassan19/cross-debate scope enable --cwd "/path/to/project"` |
 | Check dependencies and configuration | `npx --yes github:ahmed-hassan19/cross-debate setup doctor` |
 | Show the CLI and installed skill versions | `npx --yes github:ahmed-hassan19/cross-debate --version` |
-| Check the current project's enrollment | `npx --yes github:ahmed-hassan19/cross-debate scope status` |
-| Turn automatic reviews off for the current clone | `npx --yes github:ahmed-hassan19/cross-debate scope disable` |
+| Check the current project's automatic review status | `npx --yes github:ahmed-hassan19/cross-debate scope status` |
+| Opt out the current repository and linked worktrees | `npx --yes github:ahmed-hassan19/cross-debate scope disable` |
 
 `setup doctor` checks configuration and executable availability, not reviewer sign-in or native hook trust.
 Warnings about hosts you do not use can be ignored. If `scope disable` reports an active candidate, finish
@@ -98,6 +105,7 @@ To remove cross-debate completely, follow [the removal steps](skills/cross-debat
 - Replaced entries are backed up under `~/.local/share/debate/install-backups/` (or
   `$DEBATE_HOME/install-backups/`), with a manifest of original paths.
 - Upgrading from `debate` preserves review state, reviewer choices, `debate.enabled`, and old script paths.
+  Updating activates automatic reviews in existing Git projects unless they already have an explicit opt-out.
   The installer migrates selected hosts without modifying the checkout behind a skill symlink. If an
   unselected host still uses a shared legacy registration, select that host on a later run to finish migration.
 
@@ -105,13 +113,13 @@ To remove cross-debate completely, follow [the removal steps](skills/cross-debat
 
 ## How reviews work
 
-1. Two reviewers examine a plan independently. For code, a main reviewer finds issues and a debate reviewer
-   challenges them; the main reviewer then makes a final call.
+1. Reviewer 1 and Reviewer 2 examine plans independently. For code, Reviewer 1 finds possible issues;
+   Reviewer 2 challenges those findings and can add missed issues. Reviewer 1 then makes a final call.
 2. Your agent verifies the claims and addresses confirmed issues. Plan and code workflows allow up to three
    rounds of review.
 3. Before a push, you approve the exact commit and destination.
 
-Agreement between reviewers is not proof; your agent remains responsible for checking the evidence. In attached
+Agreement between reviewers is not proof; your agent remains responsible for checking the evidence. In Git
 projects, host-specific hooks remind the agent to review and check receipts and push approvals. These are
 best-effort workflow guards. Coverage depends on the host below.
 
@@ -173,7 +181,6 @@ git clone https://github.com/ahmed-hassan19/cross-debate.git ~/src/cross-debate
 ln -s ~/src/cross-debate/skills/cross-debate ~/.claude/skills/cross-debate
 D="$HOME/.claude/skills/cross-debate/scripts/debate.mjs"
 node "$D" setup init
-node "$D" scope enable --cwd "/absolute/path/to/your-project"
 ```
 
 In `setup init`, install hooks only for hosts where you have linked the skill. For Codex, replace every

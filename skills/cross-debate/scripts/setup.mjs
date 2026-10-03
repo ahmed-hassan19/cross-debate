@@ -8,9 +8,10 @@ import { pathToFileURL } from 'node:url';
 import { spawnSync } from 'node:child_process';
 import {
   CLI, PLAN_LANES, CODE_REVIEW_LANES, usage, parseArgs, debateHome, probeWritable, findScript, skillRoots, VENDOR_SKILLS_DIR,
-  loadLaneConfig, sleepMs, skillVersion,
+  loadLaneConfig, sleepMs, skillVersion, repositoryScope,
 } from './lib/common.mjs';
 import { resolveReviewOverride } from './lib/recovery.mjs';
+import { discoverModelCatalog, modelMenu } from './lib/model-catalog.mjs';
 
 const HELP = `debate.mjs setup — configure reviewer lanes and host hooks, then check the install
 
@@ -22,6 +23,9 @@ Usage:
 
 init walks you through reviewer lanes (CLI, model, effort), host hooks and the optional skills (ponytail,
 babysit-pr), then runs doctor. Run it once after installing, in your own terminal.
+Automatic reviews run in every Git repository by default and use reviewer-provider quota. Use scope disable --cwd <dir> to opt out.
+Reviewer 1 finds possible code issues; Reviewer 2 challenges them and can add missed issues. Both review plans independently.
+Choose different CLIs or model families when available. Model lists are catalog suggestions, not access checks.
 lanes proposes only lanes missing from the global delegate-skills config (plan-main[-<seat>], plan-debate,
 review-main, review-debate) for the reviewer CLIs on PATH. hooks prints the exact entries for one agent.
 --write shows the change and asks y/N; it needs an interactive terminal and keeps a *.debate-bak backup.
@@ -345,7 +349,10 @@ async function doctorCommand(flags) {
   }
   const available = REVIEWER_CLIS.filter(onPath);
   add(available.length >= 2 ? 'ok' : available.length ? 'warn' : 'fail', 'reviewer CLIs', available.join(', ') || 'none on PATH');
-  const { lanes, checks } = await reviewerReadiness(path.resolve(flags.cwd || process.cwd()));
+  const cwd = path.resolve(flags.cwd || process.cwd());
+  const scope = repositoryScope(cwd);
+  add(scope.warnings.length ? 'warn' : 'ok', 'automatic reviews', !scope.identity ? 'off: not a Git repository' : scope.warnings.length ? scope.warnings.join('; ') : scope.enabled ? `on: ${scope.configured === null ? 'Git default' : 'explicitly enabled'}${scope.effective ? '' : ' (session off)'}` : 'off: explicit project opt-out');
+  const { lanes, checks } = await reviewerReadiness(cwd);
   for (const { lane, entry, ok, error } of checks) {
     const binding = entry ? `${entry.implementer}${entry.model ? ` ${entry.model}` : ''} (${entry.source})` : '';
     add(ok ? 'ok' : 'fail', `lane ${lane}`, ok ? binding : [binding, error].filter(Boolean).join(': '));
@@ -407,17 +414,9 @@ export function buildLane({ base = {}, implementer, model = 'default', dial = nu
   return lane;
 }
 
-/** Model ids per implementer from the bundled discover.mjs; any probe failure leaves the list empty. */
-function discoverModels() {
-  try {
-    const r = spawnSync(process.execPath, [findScript('delegate-setup', 'discover.mjs')], { encoding: 'utf8', timeout: 60_000 });
-    return Object.fromEntries(JSON.parse(r.stdout).discovered.map(d => [d.key, d.models?.values ?? []]));
-  } catch { return {}; }
-}
-
 const describeLane = (lane) => [lane.implementer, lane.model ?? 'default model', lane.effort ?? lane.variant].filter(Boolean).join(' ');
 
-async function fleetStep(ask, available, modelsFor) {
+async function fleetStep(ask, available) {
   const config = await delegateConfig();
   const impls = await import(pathToFileURL(findScript('delegate-setup', 'implementers.mjs')).href);
   const efforts = { claude: impls.CLAUDE_EFFORT, agy: impls.AGY_EFFORT, copilot: impls.COPILOT_EFFORT, omp: impls.OMP_THINKING };
@@ -425,6 +424,7 @@ async function fleetStep(ask, available, modelsFor) {
   const current = config.readConfigFile(file)?.document ?? { version: 'delegate-fleet.v1', lanes: {} };
   const proposal = proposeLanes(available, {});
   const out = process.stdout;
+  const catalogs = new Map();
   out.write(`\nReviewer lanes (config ${file})\n`);
   const names = [PLAN_LANES.main, PLAN_LANES.debate, ...CODE_REVIEW_LANES];
   const seatLanes = available.map(s => `${PLAN_LANES.main}-${s}`);
@@ -447,11 +447,21 @@ async function fleetStep(ask, available, modelsFor) {
     out.write('\n');
     const implementer = pick(ask, `${name} CLI`, { choices: [...new Set([...available, base.implementer])], def: base.implementer });
     const kept = implementer === base.implementer ? base : {};
-    const listed = modelsFor(implementer).slice(0, 40);
-    const model = pick(ask, listed.length ? `${name} model (number, name, or default)` : `${name} model (no model list found for ${implementer}; type a name, or default for the CLI's own)`, {
-      choices: [...listed, 'default'], def: kept.model ?? 'default', free: true,
-      check: m => checkLane(name, buildLane({ base: kept, implementer, model: m })),
+    let model;
+    if (implementer === 'opencode') model = pick(ask, `${name} model (provider/model)`, {
+      def: kept.model ?? '', free: true,
+      check: m => /^[^/\s]+\/\S+$/.test(m) ? checkLane(name, buildLane({ base: kept, implementer, model: m })) : 'enter provider/model',
     });
+    else {
+      if (!catalogs.has(implementer)) catalogs.set(implementer, await discoverModelCatalog(implementer));
+      const choices = modelMenu(implementer, catalogs.get(implementer), kept.model).map(option => option.value === 'default' ? 'CLI default' : option.value === 'other' ? 'Enter another model' : option.value);
+      const selected = pick(ask, `${name} model (catalog suggestions; access not verified)`, {
+        choices, def: kept.model ?? 'CLI default',
+      });
+      model = selected === 'CLI default' ? 'default' : selected === 'Enter another model'
+        ? pick(ask, `${name} model ID`, { free: true, check: m => checkLane(name, buildLane({ base: kept, implementer, model: m })) })
+        : selected;
+    }
     const supports = impls.IMPLEMENTER_BY_KEY[implementer]?.supports ?? [];
     const dial = supports.includes('effort') ? 'effort' : supports.includes('variant') ? 'variant' : null;
     let value = 'none';
@@ -510,9 +520,7 @@ export async function runInit({ ask = terminalAsk, runner = defaultRunner } = {}
   out.write(`debate setup. Reviewer CLIs on PATH: ${available.join(', ') || 'none'}\n`);
   if (!available.length) out.write(`no reviewer CLI found (${REVIEWER_CLIS.join(', ')}); install one and rerun init to configure lanes\n`);
   else if (confirm(ask, 'Configure reviewer lanes?', true)) {
-    let models = null;
-    const modelsFor = (impl) => { if (!models) { out.write('discovering models…\n'); models = discoverModels(); } return models[impl] ?? []; };
-    await fleetStep(ask, available, modelsFor);
+    await fleetStep(ask, available);
   }
   for (const agent of agents) {
     out.write('\n');

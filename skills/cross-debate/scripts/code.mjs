@@ -12,7 +12,7 @@ import {
   RUN_SCHEMA, MAX_ROUNDS, CODE_REVIEW_LANES, SHA_RE, usage, nowIso, log, printJson, isPidAlive, sleepMs, newEventId,
   debateHome, ensureHome, requireWritableHome, readJsonIfExists, createRun, loadRun, updateRun, runDir,
   loadSession, updateSession, loadLedger, updateLedger, auditEvent, validateSeat, sessionIdFor, sessionKey, validateRunId,
-  resolveCwdArg, parseDuration, git, gitText, repoIdentity, headSha, resolveCommit, treeOf, parentsOf, branchOf, isAncestor,
+  resolveCwdArg, parseDuration, git, gitText, repoIdentity, headSha, emptyTreeSha, resolveCommit, treeOf, parentsOf, branchOf, isAncestor,
   commitsInRange as listCommits, startFingerprint, porcelainStatus, hasUnmerged, hasHiddenIndexBits, dirtySubmodules,
   remoteContains, remotePushUrls, remoteIsMirror, pushCommand, deleteCommand, githubRepoFromUrl, candidateStateFor, scanDiffForSecrets, SEATS, CLI, cliCommand,
   loadLaneConfig, childEnv, spawnDetached, usageFromRelayDir, addUsage, emptyUsage, validateVerdictDoc, verdictDeclaresChange, missedDeclaresChange,
@@ -155,8 +155,8 @@ export function adoptionCheck(root, { baseArg, reason }) {
   let baseSha;
   let range;
   if (!baseArg) {
-    if (parents.length !== 1) return { ok: false, status: 'parent_mismatch', reason: `HEAD ${head.slice(0, 12)} has ${parents.length} parents; adoption needs a sole-parent candidate (root and merge commits are unsupported)`, expectedParents: 1, actualParents: parents };
-    baseSha = parents[0];
+    if (parents.length > 1) return { ok: false, status: 'parent_mismatch', reason: `HEAD ${head.slice(0, 12)} has ${parents.length} parents; adoption needs a root or sole-parent candidate (merge commits are unsupported)`, expectedParents: 1, actualParents: parents };
+    baseSha = parents[0] || emptyTreeSha(root, true);
     range = [{ sha: head, parents }];
   } else {
     baseSha = resolveCommit(root, baseArg);
@@ -170,7 +170,7 @@ export function adoptionCheck(root, { baseArg, reason }) {
       if (merge) return { ok: false, status: 'unsupported_state', reason: `commit ${merge.sha.slice(0, 12)} in ${baseSha.slice(0, 7)}..HEAD has ${merge.parents.length} parents; only non-merge ranges can be adopted` };
     }
   }
-  if (range.length !== 1) return { ok: false, status: 'unsupported_state', reason: 'squash the unpublished range to one commit before begin --adopt; base must be its sole parent' };
+  if (range.length !== 1) return { ok: false, status: 'unsupported_state', reason: 'squash the unpublished range to one commit before begin --adopt; use a root commit or one whose sole parent is the base' };
   for (const c of range) {
     const refs = remoteContains(root, c.sha);
     if (refs.length) return { ok: false, status: 'published', reason: `commit ${c.sha.slice(0, 12)} is already on remote-tracking ref ${refs[0]}; published history is never adopted or amended` };
@@ -195,7 +195,7 @@ function beginCommand(flags) {
     return 0;
   }
   const head = headSha(root);
-  if (!head) throw usage('unborn HEAD: create the first commit before using debate-code');
+  if (!head && flags.base) throw usage('--base requires an existing HEAD in an unborn repository');
   const branch = branchOf(root);
   let run;
   let adoption = null;
@@ -211,7 +211,7 @@ function beginCommand(flags) {
       const base = resolveCommit(root, flags.base);
       if (base !== head) { printJson({ ok: false, status: 'base_mismatch', reason: `--base ${flags.base} must equal current HEAD ${head.slice(0, 12)} for a fresh candidate; use --adopt for an existing commit`, head }); return 0; }
     }
-    run = newCodeRun({ seat, sessionId, cwd, identity, baseSha: head, branch, adopted: false, adoptionEvidence: null, commitsInRange: null, candidateCommit: null, candidateTree: null, timeout });
+    run = newCodeRun({ seat, sessionId, cwd, identity, baseSha: head || emptyTreeSha(root, true), branch, adopted: false, adoptionEvidence: null, commitsInRange: null, candidateCommit: null, candidateTree: null, timeout });
   }
   const key = sessionKey(seat, sessionId);
   let busy = null;
@@ -249,7 +249,7 @@ export function codePreflight(home, run, { skipLanes = false } = {}) {
   const state = candidateStateFor(root, ledger.active);
   if (state.state === 'unborn') return { ok: false, status: 'unsupported_state', reason: 'unborn HEAD', warnings };
   if (state.state === 'awaiting') return { ok: false, status: 'unsupported_state', reason: `no candidate commit yet: HEAD is still the base ${run.code.baseSha.slice(0, 12)}; stage and commit first`, warnings };
-  if (state.state === 'unrelated') return { ok: false, status: 'unsupported_state', reason: `HEAD ${state.head.slice(0, 12)} is not a sole-parent child of base ${run.code.baseSha.slice(0, 12)} (parents: ${(state.parents || []).map(p => p.slice(0, 12)).join(', ') || 'none'})`, warnings };
+  if (state.state === 'unrelated') return { ok: false, status: 'unsupported_state', reason: `HEAD ${state.head.slice(0, 12)} is not a child of base ${run.code.baseSha.slice(0, 12)} or a root candidate (parents: ${(state.parents || []).map(p => p.slice(0, 12)).join(', ') || 'none'})`, warnings };
   const branch = branchOf(root);
   if (branch !== run.code.branch) return { ok: false, status: 'unsupported_state', reason: `branch changed from ${run.code.branch} to ${branch}`, warnings };
   try {
@@ -676,7 +676,7 @@ function waiveCommand(flags) {
   const abandoned = state.state === 'awaiting';
   if (state.state !== 'candidate' && !abandoned) throw usage(`HEAD ${String(state.head).slice(0, 12)} is not a candidate commit of base ${run.code.baseSha.slice(0, 12)}; restore the candidate or its unchanged base before waiving`);
   if (porcelainStatus(root).length) throw usage('worktree is not clean; stage and commit or amend before waiving');
-  const tree = treeOf(root, state.head);
+  const tree = abandoned ? null : treeOf(root, state.head);
   const session = loadSession(home, run.seat, run.sessionId);
   const now = nowIso();
   const waiver = { eventId: newEventId(), reason: flags.reason, at: now, seat: run.seat, sessionId: run.sessionId, generation: session ? session.generation : 0, waivedFrom: run.outcome || run.status, commitSha: state.head };

@@ -46,6 +46,8 @@ function gitPathSplit(raw) {
 
 export function resolveBase(repoDir, override) {
   if (override) {
+    const empty = gitText(repoDir, ['hash-object', '-t', 'tree', '/dev/null']);
+    if (override === empty) return { name: 'empty tree', sha: empty, empty: true };
     const sha = gitText(repoDir, ['rev-parse', '--verify', `${override}^{commit}`]);
     return { name: override, sha };
   }
@@ -474,7 +476,7 @@ function branchTitle(repoDir) {
 function buildPr(repoDir, tmp, resolved, madeCommit) {
   const title = branchTitle(repoDir);
   const head = gitText(tmp, ['rev-parse', 'HEAD']);
-  const logLines = run('git', ['-C', repoDir, 'log', '--oneline', `${resolved.sha}..HEAD`], { allowFail: true }).stdout.trim();
+  const logLines = run('git', ['-C', repoDir, 'log', '--oneline', resolved.empty ? 'HEAD' : `${resolved.sha}..HEAD`], { allowFail: true }).stdout.trim();
   let body = logLines;
   if (madeCommit) {
     const note = 'Snapshot includes uncommitted and untracked files (respecting .gitignore).';
@@ -488,6 +490,7 @@ function buildPr(repoDir, tmp, resolved, madeCommit) {
     headRef: title,
     baseRef: resolved.name,
     baseSha: resolved.sha,
+    emptyBase: Boolean(resolved.empty),
     fetchRef: null,
     local: true,
   };
@@ -517,6 +520,7 @@ export function snapshotWorkingTree(repoDir, { keep = false, base } = {}) {
   try {
     fs.rmSync(tmp, { recursive: true, force: true });
     run('git', ['clone', '--local', '--no-checkout', repoDir, tmp], { env: isolatedEnv() });
+    if (resolved.empty) run('git', ['-C', tmp, 'hash-object', '-t', 'tree', '-w', '/dev/null']);
     const hooksDir = path.join(tmp, '.git', 'debate-review-empty-hooks');
     fs.mkdirSync(hooksDir, { recursive: true });
     for (const key of ['core.fileMode', 'core.autocrlf', 'core.symlinks']) {

@@ -1,6 +1,6 @@
 ---
 name: cross-debate
-description: Cross-agent debate review for coding plans and code. Cross-review final plans before they are presented, review a local candidate commit before completion with an explicit-approval push gate, and run two-model reviews of GitHub PRs or working trees. Automatic in Git repositories explicitly enrolled with debate.enabled=true; anywhere on explicit request.
+description: Cross-agent debate review for coding plans and code. Cross-review final plans before they are presented, review a local candidate commit before completion with an explicit-approval push gate, and run two-model reviews of GitHub PRs or working trees. Automatic in Git repositories by default; anywhere on explicit request.
 license: MIT
 compatibility: Node 18+, Git, and at least one reviewer CLI (claude, codex or opencode); gh for PR review and branch-delete approval. Claude Code and Codex are fully gated; Cursor and OpenCode get the Git gate only (experimental).
 ---
@@ -20,13 +20,13 @@ allowlists match. Do not assume a username, home directory, or skill installatio
 
 ## Scope
 
-- Automatic use requires direct repository-local `debate.enabled=true`; missing, false, invalid, or unreadable
-  settings leave automation off.
-- Enroll only on explicit user instruction using `scope enable`; never auto-enroll by writing config.
-- Outside Git or in unenrolled repositories, run a workflow only when explicitly requested. Approval
+- Automatic use is on in Git repositories when direct repository-local `debate.enabled` is absent or true.
+  Explicit false, invalid or unreadable config, and non-Git directories leave automation off.
+- `scope disable --cwd <project>` opts out the repository and linked worktrees; `scope enable` reverses it.
+- Outside Git or in opted-out repositories, run a workflow only when explicitly requested. Approval
   requirements for pushing still apply even though the automatic guards are inactive.
 - Unsupported push syntax remains rejected even outside automatic scope; ordinary literal pushes in
-  unenrolled worktrees bypass the permit gate.
+  opted-out worktrees bypass the permit gate.
 - `DEBATE=off` disables the hooks for a session; use it only on an explicit user opt-out.
 
 ## Route

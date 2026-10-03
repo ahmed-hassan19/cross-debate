@@ -54,6 +54,13 @@ test('doctor fails when its configured reviewer is missing even though another C
   assert.match(result.stdout, /✗ lane review-main: codex .*codex is not on PATH/);
 });
 
+test('doctor reports Git default, project opt-out, and non-Git directories', () => {
+  assert.match(doctor().stdout, /automatic reviews: on: Git default/);
+  assert.equal(spawnSync(git, ['-C', repo, 'config', '--local', 'debate.enabled', 'false']).status, 0);
+  assert.match(doctor().stdout, /automatic reviews: off: explicit project opt-out/);
+  assert.match(spawnSync(process.execPath, [cli, 'setup', 'doctor', '--cwd', home], { encoding: 'utf8' }).stdout, /automatic reviews: off: not a Git repository/);
+});
+
 test('untrusted project plan overrides fail doctor and prospective installation checks', async () => {
   project({ 'plan-main': { implementer: 'claude', model: 'project-model' } });
   const before = fs.readFileSync(projectFile, 'utf8');

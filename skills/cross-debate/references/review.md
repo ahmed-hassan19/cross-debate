@@ -9,7 +9,7 @@ You are the orchestrator. You run one command and relay the result. You do not r
 yourself, and you do not touch the PR.
 
 Automatic use comes through the opted-in code workflow ([code](code.md)). Explicit requests for PR or local
-review work without repository enrollment; this command does not enroll repositories.
+review work outside automatic scope; this command does not change repository config.
 
 ## Run it
 

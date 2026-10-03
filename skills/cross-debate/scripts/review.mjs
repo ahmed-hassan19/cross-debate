@@ -278,7 +278,7 @@ export async function main(argv) {
 
   try {
     fs.mkdirSync(outDir, { recursive: true });
-    const diff = text('git', ['-C', worktree, 'diff', '--no-ext-diff', '--no-textconv', '--no-color', `${baseRef}...HEAD`]);
+    const diff = text('git', ['-C', worktree, 'diff', '--no-ext-diff', '--no-textconv', '--no-color', `${baseRef}${pr.emptyBase ? '..' : '...'}HEAD`]);
     if (!diff.trim()) throw new Error('empty diff, nothing to review');
     const secretHits = scanDiffForSecrets(diff);
     if (secretHits.length) {
@@ -286,7 +286,7 @@ export async function main(argv) {
       save();
       throw new Error(`${secretHits.length} potential secret(s) in the diff; no reviewer ran: ${secretHits.map(h => `${h.file} (diff line ${h.diffLine}, ${h.pattern})`).join('; ')}`);
     }
-    const commits = text('git', ['-C', worktree, 'log', `${baseRef}..HEAD`, '--oneline']);
+    const commits = text('git', ['-C', worktree, 'log', pr.emptyBase ? 'HEAD' : `${baseRef}..HEAD`, '--oneline']);
     const lineMap = diffLineMap(diff);
     // The worktree is this command's disposable checkout of possibly untrusted code. Agent configuration in it would
     // run when a reviewer starts (a headless Claude session loads project hooks), so it is removed first.

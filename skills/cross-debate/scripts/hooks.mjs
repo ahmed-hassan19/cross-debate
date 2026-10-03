@@ -7,7 +7,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import {
   SESSION_RE, SHELLS, SKILL_DIR, usage, nowIso, log, newEventId, debateHome, ensureHome, automationOff, readStdin, cliCommand,
-  loadRun, loadSession, updateSession, loadLedger, updateLedger, auditEvent, sessionKey, repoIdentity, headSha, branchOf,
+  loadRun, loadSession, updateSession, loadLedger, updateLedger, auditEvent, sessionKey, repoIdentity, headSha, emptyTreeSha, branchOf,
   startFingerprint, porcelainStatus, splitPlan, planPathFromTranscript, extractProposedPlan, gitGateDecision, isPidAlive,
   repositoryScope, worktreeRoots, treeOf, git,
 } from './lib/common.mjs';
@@ -86,8 +86,7 @@ function onSessionStart({ seat, sessionId, cwd, input, home, gitOpts }) {
   updateLedger(home, identity, (l) => {
     if (l.baselines[key]) return l;
     const head = headSha(identity.worktreeRoot, gitOpts);
-    if (!head) return l;
-    l.baselines[key] = { seat, sessionId, headSha: head, branch: branchOf(identity.worktreeRoot, gitOpts), startFingerprint: startFingerprint(identity.worktreeRoot, gitOpts), at: nowIso(), source: 'session_start', reason: null, runId: null, eventId: newEventId() };
+    l.baselines[key] = { seat, sessionId, headSha: head || emptyTreeSha(identity.worktreeRoot), branch: branchOf(identity.worktreeRoot, gitOpts), startFingerprint: startFingerprint(identity.worktreeRoot, gitOpts), at: nowIso(), source: 'session_start', reason: null, runId: null, eventId: newEventId() };
     recorded = true;
     return l;
   });
