@@ -264,9 +264,10 @@ export function repositoryScope(cwd, { home = debateHome(), ...gitOpts } = {}) {
   if (!identity) return { identity: null, configured: null, enabled: false, effective: false, warnings };
   const r = git(identity.worktreeRoot, ['config', '--local', '--no-includes', '--type=bool', '--get-all', 'debate.enabled'], { ...gitOpts, allowFail: true });
   let configured = null;
+  let valid = true;
   if (r.status === 0) configured = r.stdout.trim().split('\n').at(-1) === 'true';
-  else if (r.status !== 1) { warnings.push('invalid or unreadable local debate.enabled; defaulting to disabled'); log(warnings[0]); }
-  const enabled = configured === true;
+  else if (r.status !== 1) { valid = false; warnings.push('invalid or unreadable local debate.enabled; defaulting to disabled'); log(warnings[0]); }
+  const enabled = valid && configured !== false;
   return { identity, configured, enabled, effective: enabled && !automationOff(home), warnings };
 }
 export function withRepositoryScopeLock(cwd, fn, home = debateHome()) {
@@ -328,6 +329,9 @@ export function headSha(cwd, opts) {
   const r = git(cwd, ['rev-parse', '--verify', '-q', 'HEAD^{commit}'], { allowFail: true, ...opts });
   return r.status === 0 ? r.stdout.trim() : null;
 }
+export function emptyTreeSha(cwd, write = false) {
+  return gitText(cwd, ['hash-object', '-t', 'tree', ...(write ? ['-w'] : []), '/dev/null']);
+}
 export function resolveCommit(cwd, ref, opts) {
   const r = git(cwd, ['rev-parse', '--verify', '-q', `${ref}^{commit}`], { allowFail: true, ...opts });
   return r.status === 0 ? r.stdout.trim() : null;
@@ -350,7 +354,7 @@ export function commitsInRange(cwd, base, head, opts) {
 }
 /** SHA-256 of `git diff HEAD` plus the sorted untracked list with sizes and mtimes. Change detector only, never a content identity. */
 export function startFingerprint(root, opts) {
-  const diff = git(root, ['diff', 'HEAD', '--no-ext-diff', '--no-color', '--'], opts).stdout;
+  const diff = git(root, ['diff', ...(headSha(root, opts) ? ['HEAD'] : ['--cached']), '--no-ext-diff', '--no-color', '--'], opts).stdout;
   const raw = git(root, ['ls-files', '-o', '--exclude-standard', '-z'], opts).stdout;
   const entries = raw.split('\0').filter(Boolean).sort().map(rel => {
     try { const st = fs.lstatSync(path.join(root, rel)); return `${rel}\0${st.size}\0${Math.floor(st.mtimeMs)}`; } catch { return `${rel}\0missing`; }
@@ -792,14 +796,14 @@ export function remoteIsMirror(root, remote, opts) {
   const r = git(root, ['config', '--get', `remote.${remote}.mirror`], { allowFail: true, ...opts });
   return r.status === 0 && r.stdout.trim() === 'true';
 }
-/** Recognize the active candidate for a ledger: HEAD == base (awaiting) or HEAD is a sole-parent child of base. */
+/** Recognize a child commit or a root commit over the empty tree as the active candidate. */
 export function candidateStateFor(root, active, opts) {
   const head = headSha(root, opts);
-  if (!head) return { state: 'unborn', head };
+  if (!head) return { state: active.baseSha === emptyTreeSha(root) ? 'awaiting' : 'unborn', head };
   if (head === active.baseSha) return { state: 'awaiting', head };
   const parents = parentsOf(root, head, opts);
   if (active.commitsInRange > 1 && active.candidateCommit === head) return { state: 'candidate', head };
-  if (parents.length === 1 && parents[0] === active.baseSha) return { state: 'candidate', head };
+  if ((parents.length === 1 && parents[0] === active.baseSha) || (parents.length === 0 && active.baseSha === emptyTreeSha(root))) return { state: 'candidate', head };
   return { state: 'unrelated', head, parents };
 }
 
@@ -814,7 +818,7 @@ export function gitGateDecision({ command, cwd, home, gitOpts = {} }) {
   if (!muts.length) return { decision: 'pass' };
   const pushes = muts.filter(m => m.kind === 'push');
   if (pushes.length) {
-    if (muts.length !== 1 || !analysis.pushOnly) return { decision: 'deny', reason: 'debate-code: a git push must be the only Git mutation and the whole command (optionally after one literal cd <dir> &&); Use a plain literal Git push as the whole command in a resolved unenrolled worktree; when guards are active, run the exact approved command. Resolve unknown targets to a literal Git worktree first.' };
+    if (muts.length !== 1 || !analysis.pushOnly) return { decision: 'deny', reason: 'debate-code: a git push must be the only Git mutation and the whole command (optionally after one literal cd <dir> &&); Use a plain literal Git push as the whole command in a resolved opted-out worktree; when guards are active, run the exact approved command. Resolve unknown targets to a literal Git worktree first.' };
     return pushGate(pushes[0], cwd, home, gitOpts);
   }
   const contexts = muts.map(m => {
@@ -850,7 +854,7 @@ export function gitGateDecision({ command, cwd, home, gitOpts = {} }) {
 }
 
 function pushGate(m, cwd, home, gitOpts) {
-  const denyDefault = (why) => ({ decision: 'deny', reason: `debate-code: unsupported push command (${why}). Resolve unknown targets to a literal Git worktree first. In a resolved unenrolled worktree, use a plain literal Git push as the whole command. When guards are active, run ${cliCommand('code approve-push')} --run <id> --remote <name> --ref refs/heads/<branch> --reason "user approved: ..." and execute the returned command verbatim; to delete a merged PR's branch, run ${cliCommand('code approve-delete')} --cwd <dir> --remote <name> --ref refs/heads/<branch> --pr <url> --reason "user approved: ..." and execute its command verbatim. Set DEBATE=off only when the user explicitly opts out of the gate.` });
+  const denyDefault = (why) => ({ decision: 'deny', reason: `debate-code: unsupported push command (${why}). Resolve unknown targets to a literal Git worktree first. In a resolved opted-out worktree, use a plain literal Git push as the whole command. When guards are active, run ${cliCommand('code approve-push')} --run <id> --remote <name> --ref refs/heads/<branch> --reason "user approved: ..." and execute the returned command verbatim; to delete a merged PR's branch, run ${cliCommand('code approve-delete')} --cwd <dir> --remote <name> --ref refs/heads/<branch> --pr <url> --reason "user approved: ..." and execute its command verbatim. Set DEBATE=off only when the user explicitly opts out of the gate.` });
   const form = unsupportedForm(m);
   if (form) return denyDefault(form);
   const dir = resolveMutationDir(m, cwd);

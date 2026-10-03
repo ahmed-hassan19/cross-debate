@@ -77,7 +77,7 @@ test('packed skill installs outside the checkout and runs without npm dependenci
   const bin = path.join(temp, 'bin');
   fs.mkdirSync(bin);
   for (const name of ['claude', 'codex']) {
-    fs.writeFileSync(path.join(bin, name), '#!/bin/sh\nprintf called > "$HOME/reviewer-called"\nexit 99\n', { mode: 0o755 });
+    fs.writeFileSync(path.join(bin, name), '#!/bin/sh\nif [ "$1" != "app-server" ]; then printf called > "$HOME/reviewer-called"; fi\nexit 99\n', { mode: 0o755 });
   }
   fs.symlinkSync(run('which', ['git']).trim(), path.join(bin, 'git'));
   fs.symlinkSync(process.execPath, path.join(bin, 'node'));
