@@ -1,4 +1,13 @@
-# cross-debate
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/assets/mark-dark.svg">
+  <img src="docs/assets/mark-light.svg" alt="" width="64" height="64">
+</picture>
+
+# Cross Debate
+
+[![CI](https://github.com/ahmed-hassan19/cross-debate/actions/workflows/test.yml/badge.svg)](https://github.com/ahmed-hassan19/cross-debate/actions/workflows/test.yml)
+[![MIT license](https://img.shields.io/badge/license-MIT-52615d)](LICENSE)
+[![Node 22+ installer](https://img.shields.io/badge/installer-Node_22%2B-327b73)](docs/setup.md)
 
 Cross-agent review for plans, code, and pull requests.
 Your coding agent coordinates two reviewers, verifies findings in plan and code workflows, and asks before pushing.
@@ -90,6 +99,22 @@ See [operations](skills/cross-debate/references/operations.md) for limitations a
 [Setup, updates, and removal](docs/setup.md) · [Reviewer configuration](docs/configuration.md) ·
 [Contributing and support](https://github.com/ahmed-hassan19/cross-debate/blob/main/CONTRIBUTING.md)
 
+## Recorded outcomes
+
+One maintainer's changing workflows, frozen on October 3, 2026. Finding occurrences can repeat across rounds;
+these counts do not represent unique bugs or a comparison against another review method.
+
+| Recorded measure | Count |
+|---|---|
+| Workflow runs | 236 (92 plan, 144 code) |
+| Code runs with accepted findings | 43 of 135 with orchestrator verdicts |
+| Findings marked fixed in code verdicts | 55 occurrences across 18 runs |
+| Blocking findings marked fixed | 31 occurrences across 11 runs |
+| Backend-agreed findings discarded by the orchestrator | 17 occurrences |
+
+Read the [field report](docs/field-report.md) for the frozen inventory cutoff, coverage, timing, and limitations.
+The [aggregate JSON](docs/field-report.json) contains no private source records.
+
 ## Special thanks
 
 Thanks to the projects and authors this skill builds on:
@@ -111,3 +136,4 @@ Bundled and adapted code, with pinned upstream commits and license texts, is lis
 ## License
 
 MIT. See [LICENSE](LICENSE) and [THIRD_PARTY_NOTICES.md](skills/cross-debate/THIRD_PARTY_NOTICES.md).
+The original [mark and banner](docs/branding.md) are included under the same license.

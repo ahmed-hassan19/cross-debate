@@ -95,6 +95,7 @@ test('occurrences join same-round verdicts and separate outcomes and partial mea
   assert.deepEqual(code.findings, { occurrences: 3, adjudicated: 2, confirm: 1, modify: 0, discard: 1, acceptedBlocking: 1,
     recordedFixed: 1, recordedFixedBlocking: 1, agreedDiscarded: 1, unadjudicated: 1, unmatchedVerdicts: 1 });
   assert.equal(code.runsContaining.withRecordedBlockingFixes, 1);
+  for (const key of ['withFindings', 'withAdjudicatedFindings', 'withUnadjudicated', 'withUnmatchedVerdicts', 'withAgreedDiscarded']) assert.equal(code.runsContaining[key], 1, key);
   assert.equal(code.runsContaining.withFailures, 1);
   for (const key of ['failed', 'waived', 'unfinished', 'changedAfterReview', 'finishedWithoutVerdict']) assert.equal(code.reviewStates[key], 1, key);
   assert.equal(report.workflows.plan.reviewStates.changedAfterReview, 1);
@@ -107,6 +108,22 @@ test('occurrences join same-round verdicts and separate outcomes and partial mea
   assert.equal(report.standalone.records, 1);
   assert.equal(report.standalone.orchestratorVerdicts, 0);
   assert.doesNotMatch(JSON.stringify(report), /PRIVATE_SENTINEL|owner__repo|abcdef012345/);
+});
+
+test('run counts for each decision count a run once across repeated findings and rounds', t => {
+  const { options, raw } = fixture(t);
+  const repeated = n => round(n, ['F1', 'F2', 'F3', 'F4'].map(finding),
+    [verdict('F1'), verdict('F2'), verdict('F3', 'modify'), verdict('F4', 'discard')]);
+  raw(options.home, run('repeated', { rounds: [repeated(1), repeated(2)] }));
+  raw(options.home, run('empty-verdict', { rounds: [round(1, [], [])] }));
+  const code = aggregateHistory(readHistory(options)).workflows.code;
+  assert.equal(code.findings.occurrences, 8);
+  assert.equal(code.findings.confirm, 4);
+  assert.equal(code.findings.modify, 2);
+  assert.equal(code.findings.discard, 2);
+  for (const key of ['withFindings', 'withAdjudicatedFindings', 'withConfirm', 'withModify', 'withDiscard']) assert.equal(code.runsContaining[key], 1, key);
+  assert.equal(code.runsContaining.withVerdicts, 2, 'empty verdict is coverage, not an adjudicated finding');
+  assert.equal(code.runsContaining.withRounds, 2);
 });
 
 test('stats since filters exported rows and kind filters audit totals without changing JSON structure', t => {
