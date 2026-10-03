@@ -8,7 +8,7 @@ import { spawnSync } from 'node:child_process';
 import * as p from '@clack/prompts';
 import { initSync, parse, edit } from '@rainbowatcher/toml-edit-js';
 import { hookEntries, mergeHooks, opencodePlugin, buildLane, reviewerReadiness } from '../skills/cross-debate/scripts/setup.mjs';
-import { SKILL_DIR, debateHome, repositoryScope, changeRepositoryScope, writeAtomic, skillVersion } from '../skills/cross-debate/scripts/lib/common.mjs';
+import { SKILL_DIR, debateHome, repositoryScope, changeRepositoryScope, writeAtomic, skillVersion, shellQuote } from '../skills/cross-debate/scripts/lib/common.mjs';
 import { globalConfigPath, parseConfigDocument } from '../skills/cross-debate/vendor/delegate-skills/delegate-setup/scripts/config.mjs';
 
 const labels = { claude: 'Claude Code', codex: 'Codex', cursor: 'Cursor (experimental)', opencode: 'OpenCode (experimental)' };
@@ -261,6 +261,8 @@ export async function install(ui = p, cwd = process.cwd()) {
       .map(h => `${labels[h]}: both plan reviewers use the same CLI and model.`);
     if (repeat(lanes['review-main'], lanes['review-debate'])) warnings.push('Both code reviewers use the same CLI and model.');
     ui.note([
+      'The skill and host hooks are installed globally. Automatic reviews require separate project enrollment.',
+      'Review sessions consume your configured reviewer providers\' usage.',
       `Hosts: ${hosts.map(h => labels[h]).join(', ')}`,
       `Plan reviewers: ${describe(lanes['plan-main'])} → ${describe(lanes['plan-debate'])}`,
       `Code reviewers: ${describe(lanes['review-main'])} → ${describe(lanes['review-debate'])}`,
@@ -276,12 +278,19 @@ export async function install(ui = p, cwd = process.cwd()) {
     if (backup) ui.log.info(`Backups: ${backup}`);
     const automaticHosts = hosts.filter(host => host === 'claude' || host === 'codex');
     const attached = scope.configured || attach;
+    const effective = repositoryScope(cwd).effective;
     ui.note([
+      `Installed cross-debate ${version} for ${hosts.map(host => labels[host]).join(', ')}.`,
+      `Project: ${attached ? `attached; automatic guards ${effective ? 'enabled' : 'inactive (automation disabled)'}` : 'not attached; explicit reviews only'}.`,
       'Restart your agent to load cross-debate.',
       ...(hosts.includes('codex') ? ['In Codex, review and trust the new hooks when prompted.'] : []),
+      'Verify from your project directory:',
+      ...hosts.map(host => `node ${shellQuote(path.join(homes[host], 'skills', 'cross-debate', 'scripts', 'debate.mjs'))} setup doctor --agent ${host} --cwd ${shellQuote(cwd)}`),
       ...(!attached ? [`To attach a project: ${installCommand} scope enable --cwd /path/to/project`] : []),
-      ...(attached && automaticHosts.length ? [`In ${automaticHosts.map(host => labels[host]).join(' and ')}, enter plan mode and describe your task. Plan and code reviews run automatically.`] : []),
-      ...(!attached || hosts.some(host => host === 'cursor' || host === 'opencode') ? ['For a manual review, ask: Use cross-debate to review this plan.'] : []),
+      ...(effective && automaticHosts.length ? [`In ${automaticHosts.map(host => labels[host]).join(' and ')}, enter plan mode and describe your task. Plan and code reviews run automatically.`] : []),
+      'First review prompt: Use cross-debate to review a plan for adding a small regression test in this project.',
+      ...(hosts.some(host => host === 'cursor' || host === 'opencode') ? ['Cursor/OpenCode: request reviews explicitly; experimental hooks gate Git only.'] : []),
+      'Expect reviewer findings, the agent\'s verified decisions, and a review outcome. Sign-in and native hook execution still need an interactive check.',
     ].join('\n'), 'Next');
     ui.outro('Installed. Your next agent session can use cross-debate.');
     return 0;
@@ -310,8 +319,8 @@ Other commands:
 
   scope enable                Attach the current Git project
   scope status                Check project enrollment
-  setup doctor                Check dependencies
-  review <PR URL> --dry-run    Preview a PR review
+  setup doctor --agent codex  Check one host (or claude, cursor, opencode)
+  review <PR URL> --dry-run    Run models without posting the PR review
 
 Run installation in your own terminal. Node 22+ is required.`);
     return 0;
