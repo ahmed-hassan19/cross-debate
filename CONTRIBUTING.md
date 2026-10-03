@@ -24,7 +24,7 @@ interactive host trust.
 
 Keep each pull request focused. Describe the user-visible change and the checks you ran. Add a regression
 case for behavior changes. Do not include local `AGENTS.md`, `CLAUDE.md`, review transcripts, credentials,
-or generated archives. Follow the README's pinned-source procedure when updating bundled relays.
+or generated archives. Follow the [pinned-source procedure](#updating-the-bundled-delegate-skills) when updating bundled relays.
 
 ## Reporting a problem
 
@@ -51,3 +51,24 @@ For a workflow problem, include the failed stage and error class; a full session
    only after registry verification.
 
 Keep publication separate from ordinary test and pull-request workflows. A failed publication is not a release.
+
+## Updating the bundled delegate-skills
+
+The seven files under `skills/cross-debate/vendor/delegate-skills/` come from one pinned upstream commit.
+To update them, replace `FULL_COMMIT_SHA` below with the commit you have reviewed:
+
+```sh
+DELEGATE_COMMIT="FULL_COMMIT_SHA"
+DELEGATE_SOURCE=$(mktemp -d)
+git clone https://github.com/amElnagdy/delegate-skills.git "$DELEGATE_SOURCE" &&
+git -C "$DELEGATE_SOURCE" checkout "$DELEGATE_COMMIT" &&
+for f in claude-delegate/scripts/relay.mjs codex-delegate/scripts/relay.mjs opencode-delegate/scripts/relay.mjs \
+         delegate-setup/scripts/config.mjs delegate-setup/scripts/lane.mjs delegate-setup/scripts/implementers.mjs \
+         delegate-setup/scripts/discover.mjs; do
+  cp "$DELEGATE_SOURCE/skills/$f" "skills/cross-debate/vendor/delegate-skills/$f"
+done
+npm test
+```
+
+Update the pinned commit in [THIRD_PARTY_NOTICES.md](skills/cross-debate/THIRD_PARTY_NOTICES.md) and inspect the
+relay diff before committing. Each relay must retain its `--read-only` behavior and advertise it in `--help`.
