@@ -1175,10 +1175,15 @@ export function statsRowFromRun(run) {
   };
 }
 function ratio(n, d) { return d > 0 ? Number((n / d).toFixed(4)) : null; }
-export function computeStats(rows, { kind, seat, since } = {}) {
-  const sinceMs = since ? Date.now() - since : null;
-  const runs = rows.filter(r => r.recordType === 'run' && (!kind || r.kind === kind) && (!seat || r.seat === seat) && (!sinceMs || Date.parse(r.startedAt) >= sinceMs));
-  const audits = rows.filter(r => r.recordType === 'audit' && (!seat || r.seat === seat) && (!sinceMs || Date.parse(r.at) >= sinceMs));
+function filterStatsRows(rows, { kind, seat, since } = {}) {
+  const sinceMs = since == null ? null : Date.now() - since;
+  return rows.filter(r => (!kind || r.kind === kind) && (!seat || r.seat === seat)
+    && (sinceMs === null || Date.parse(r.recordType === 'audit' ? r.at : r.startedAt) >= sinceMs));
+}
+export function computeStats(rows, filters = {}) {
+  const selected = filterStatsRows(rows, filters);
+  const runs = selected.filter(r => r.recordType === 'run');
+  const audits = selected.filter(r => r.recordType === 'audit');
   const sum = (f) => runs.reduce((s, r) => s + (f(r) || 0), 0);
   const claims = { total: sum(r => r.claims.total), confirmed: sum(r => r.claims.confirmed), modified: sum(r => r.claims.modified), discarded: sum(r => r.claims.discarded), contested: sum(r => r.claims.contested), reversed: sum(r => r.claims.reversed), missed: sum(r => r.claims.missed) };
   const validatedCorrect = claims.confirmed + claims.modified;
@@ -1444,10 +1449,10 @@ export function statsCommand(flags, home) {
     if (!m) throw usage('--since must look like 30d, 12h, or 90m');
     since = Number(m[1]) * ({ d: 86_400_000, h: 3_600_000, m: 60_000 })[m[2]];
   }
-  const rows = readStats(home);
-  const summary = computeStats(rows, { kind: flags.kind, seat: flags.seat, since });
+  const rows = filterStatsRows(readStats(home), { kind: flags.kind, seat: flags.seat, since });
+  const summary = computeStats(rows);
   const doc = { ok: true, home, filters: { kind: flags.kind || null, seat: flags.seat || null, since: flags.since || null }, summary };
-  if (flags.json) doc.rows = rows.filter(r => (!flags.kind || r.kind === flags.kind) && (!flags.seat || r.seat === flags.seat));
+  if (flags.json) doc.rows = rows;
   printJson(doc);
   return 0;
 }
