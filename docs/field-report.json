@@ -1,0 +1,92 @@
+{
+  "schema": "cross-debate.history-report.v1",
+  "dataset": {"earliestStart": "2026-09-10T20:03:38.098Z", "latestStart": "2026-10-03T00:48:59.535Z", "startsRecorded": 255},
+  "coverage": {
+    "inputFiles": 257,
+    "validRawRecords": 236,
+    "validStatsRecords": 421,
+    "validStandaloneRecords": 19,
+    "auditRowsIgnored": 531,
+    "malformedRecords": 0,
+    "unsupportedRecords": 0,
+    "symlinksSkipped": 0,
+    "duplicateRawRecords": 0,
+    "duplicateStatsRecords": 192,
+    "statsShadowedByRaw": 229,
+    "selected": {"currentRaw": 229, "archiveRaw": 7, "currentStatsOnly": 0, "archiveStatsOnly": 0, "standalone": 19}
+  },
+  "workflows": {
+    "plan": {
+      "runs": 92,
+      "statuses": {"new": 0, "running": 1, "round_open": 0, "awaiting_verdict": 2, "continue": 0, "stopped": 3, "review_failed": 1, "preflight_failed": 0, "finished": 85, "missing": 0, "other": 0},
+      "outcomes": {"passed": 0, "completed": 79, "failed": 6, "waived": 0, "changed_after_review": 0, "blocked": 0, "exhausted_with_blockers": 0, "bad_output": 0, "secrets_detected": 0, "unsupported_state": 0, "nothing_to_review": 0, "missing": 7, "other": 0},
+      "reviewStates": {"failed": 11, "waived": 0, "unfinished": 3, "changedAfterReview": 68, "blocked": 0, "finishedWithVerdict": 10, "finishedWithoutVerdict": 0, "missing": 0, "other": 0},
+      "rounds": {"eligible": 92, "recorded": 92, "missing": 0, "total": 159, "median": 2},
+      "attempts": 181,
+      "failedAttempts": 33,
+      "attemptStatuses": {"running": 1, "completed": 147, "failed": 33, "missing": 0, "other": 0},
+      "findings": {"occurrences": 508, "adjudicated": 490, "confirm": 365, "modify": 96, "discard": 29, "acceptedBlocking": 48, "recordedFixed": 0, "recordedFixedBlocking": 0, "agreedDiscarded": 0, "unadjudicated": 18, "unmatchedVerdicts": 0},
+      "runsContaining": {"withRounds": 92, "withAttempts": 92, "withFailures": 18, "withVerdicts": 81, "withFindings": 83, "withAdjudicatedFindings": 81, "withConfirm": 78, "withModify": 50, "withDiscard": 18, "withAgreedDiscarded": 0, "withUnadjudicated": 2, "withUnmatchedVerdicts": 0, "withAcceptedFindings": 80, "withAcceptedBlocking": 32, "withRecordedFixes": 0, "withRecordedBlockingFixes": 0},
+      "recordedAttemptSeconds": {"eligible": 181, "recorded": 178, "missing": 3, "total": 73635, "median": 313.5},
+      "wallElapsedSeconds": {"eligible": 92, "recorded": 85, "missing": 7, "total": 234328.98599999998, "median": 909.408},
+      "providerReported": {
+        "agentRecords": 325,
+        "inputTokens": {"eligible": 325, "recorded": 244, "missing": 81, "total": 89139765, "median": 246114},
+        "outputTokens": {"eligible": 325, "recorded": 244, "missing": 81, "total": 2347702, "median": 3248.5},
+        "cacheReadTokens": {"eligible": 325, "recorded": 244, "missing": 81, "total": 75282218, "median": 201344},
+        "cacheWriteTokens": {"eligible": 325, "recorded": 244, "missing": 81, "total": 8497161, "median": 0},
+        "costUsd": {"eligible": 325, "recorded": 200, "missing": 125, "total": 267.3579379499999, "median": 0.7036747000000001}
+      },
+      "orchestratorNonAdditive": {
+        "inputTokens": {"eligible": 92, "recorded": 85, "missing": 7, "total": 273487380, "median": 2069502},
+        "outputTokens": {"eligible": 92, "recorded": 85, "missing": 7, "total": 1218073, "median": 11304}
+      }
+    },
+    "code": {
+      "runs": 144,
+      "statuses": {"new": 0, "running": 1, "round_open": 0, "awaiting_verdict": 0, "continue": 0, "stopped": 0, "review_failed": 0, "preflight_failed": 0, "finished": 143, "missing": 0, "other": 0},
+      "outcomes": {"passed": 125, "completed": 0, "failed": 1, "waived": 16, "changed_after_review": 1, "blocked": 0, "exhausted_with_blockers": 0, "bad_output": 0, "secrets_detected": 0, "unsupported_state": 0, "nothing_to_review": 0, "missing": 1, "other": 0},
+      "reviewStates": {"failed": 1, "waived": 16, "unfinished": 1, "changedAfterReview": 6, "blocked": 0, "finishedWithVerdict": 120, "finishedWithoutVerdict": 0, "missing": 0, "other": 0},
+      "rounds": {"eligible": 144, "recorded": 144, "missing": 0, "total": 163, "median": 1},
+      "attempts": 179,
+      "failedAttempts": 20,
+      "attemptStatuses": {"running": 1, "completed": 158, "failed": 20, "missing": 0, "other": 0},
+      "findings": {"occurrences": 112, "adjudicated": 112, "confirm": 92, "modify": 2, "discard": 18, "acceptedBlocking": 40, "recordedFixed": 55, "recordedFixedBlocking": 31, "agreedDiscarded": 17, "unadjudicated": 0, "unmatchedVerdicts": 0},
+      "runsContaining": {"withRounds": 139, "withAttempts": 139, "withFailures": 14, "withVerdicts": 135, "withFindings": 53, "withAdjudicatedFindings": 53, "withConfirm": 42, "withModify": 2, "withDiscard": 11, "withAgreedDiscarded": 10, "withUnadjudicated": 0, "withUnmatchedVerdicts": 0, "withAcceptedFindings": 43, "withAcceptedBlocking": 14, "withRecordedFixes": 18, "withRecordedBlockingFixes": 11},
+      "recordedAttemptSeconds": {"eligible": 179, "recorded": 177, "missing": 2, "total": 57727, "median": 232},
+      "wallElapsedSeconds": {"eligible": 144, "recorded": 143, "missing": 1, "total": 191441.413, "median": 302.911},
+      "providerReported": {
+        "agentRecords": 416,
+        "inputTokens": {"eligible": 416, "recorded": 310, "missing": 106, "total": 91798010, "median": 160852},
+        "outputTokens": {"eligible": 416, "recorded": 310, "missing": 106, "total": 920762, "median": 1699.5},
+        "cacheReadTokens": {"eligible": 416, "recorded": 310, "missing": 106, "total": 78485896, "median": 128256},
+        "cacheWriteTokens": {"eligible": 416, "recorded": 310, "missing": 106, "total": 3209588, "median": 0},
+        "costUsd": {"eligible": 416, "recorded": 172, "missing": 244, "total": 91.63467299999999, "median": 0}
+      },
+      "orchestratorNonAdditive": {
+        "inputTokens": {"eligible": 144, "recorded": 129, "missing": 15, "total": 491855681, "median": 1881895},
+        "outputTokens": {"eligible": 144, "recorded": 129, "missing": 15, "total": 1344261, "median": 4707}
+      }
+    }
+  },
+  "statsOnly": {
+    "runs": 0,
+    "kinds": {"plan": 0, "code": 0, "missing": 0, "other": 0},
+    "outcomes": {"passed": 0, "completed": 0, "failed": 0, "waived": 0, "changed_after_review": 0, "blocked": 0, "exhausted_with_blockers": 0, "bad_output": 0, "secrets_detected": 0, "unsupported_state": 0, "nothing_to_review": 0, "missing": 0, "other": 0},
+    "recordedRounds": {"eligible": 0, "recorded": 0, "missing": 0, "total": null, "median": null},
+    "wallElapsedSeconds": {"eligible": 0, "recorded": 0, "missing": 0, "total": null, "median": null}
+  },
+  "standalone": {
+    "records": 19,
+    "local": 8,
+    "pr": 11,
+    "withFinishedTimestamp": 16,
+    "withMainAndDebate": 14,
+    "withRenderedReview": 14,
+    "sourceFindingOccurrences": 26,
+    "finalDispositions": {"agreed": 18, "contested": 2, "withdrawn": 0, "missing": 0, "other": 0},
+    "recordedStageSeconds": {"eligible": 42, "recorded": 42, "missing": 0, "total": 5901, "median": 77},
+    "wallElapsedSeconds": {"eligible": 19, "recorded": 16, "missing": 3, "total": 5663.611999999999, "median": 186.946},
+    "orchestratorVerdicts": 0
+  }
+}

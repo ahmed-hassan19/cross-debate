@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 960 144" role="img" aria-labelledby="title">
+  <title id="title">Cross Debate</title>
+  <rect width="960" height="144" fill="#f7f7f2"/>
+  <path d="M82 48H68v48h14M102 48h14v48h-14" fill="none" stroke="#252b2a" stroke-width="4"/>
+  <circle cx="92" cy="72" r="5" fill="#327b73"/>
+  <text x="156" y="86" fill="#252b2a" font-family="system-ui, -apple-system, BlinkMacSystemFont, sans-serif" font-size="40" font-weight="600">Cross Debate</text>
+</svg>

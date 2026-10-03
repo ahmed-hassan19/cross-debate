@@ -127,11 +127,14 @@ function reviewState(run) {
 function workflowAggregate(runs) {
   const findings = { occurrences: 0, adjudicated: 0, confirm: 0, modify: 0, discard: 0, acceptedBlocking: 0,
     recordedFixed: 0, recordedFixedBlocking: 0, agreedDiscarded: 0, unadjudicated: 0, unmatchedVerdicts: 0 };
-  const events = { withAttempts: 0, withFailures: 0, withVerdicts: 0, withAcceptedFindings: 0, withAcceptedBlocking: 0, withRecordedFixes: 0, withRecordedBlockingFixes: 0 };
+  const events = { withRounds: 0, withAttempts: 0, withFailures: 0, withVerdicts: 0, withFindings: 0, withAdjudicatedFindings: 0,
+    withConfirm: 0, withModify: 0, withDiscard: 0, withAgreedDiscarded: 0, withUnadjudicated: 0, withUnmatchedVerdicts: 0,
+    withAcceptedFindings: 0, withAcceptedBlocking: 0, withRecordedFixes: 0, withRecordedBlockingFixes: 0 };
   const attempts = [], agents = [];
   for (const run of runs) {
     const seen = new Set();
     for (const round of run.rounds) {
+      seen.add('withRounds');
       attempts.push(...round.attempts);
       for (const attempt of round.attempts) {
         seen.add('withAttempts');
@@ -141,13 +144,17 @@ function workflowAggregate(runs) {
       if (round.verdict) seen.add('withVerdicts');
       const byId = new Map((round.review?.findings || []).map(f => [f.id, f]));
       const verdicts = new Map((round.verdict?.verdicts || []).map(v => [v.id, v]));
-      for (const id of verdicts.keys()) if (!byId.has(id)) findings.unmatchedVerdicts++;
+      for (const id of verdicts.keys()) if (!byId.has(id)) { findings.unmatchedVerdicts++; seen.add('withUnmatchedVerdicts'); }
       for (const [id, finding] of byId) {
-        findings.occurrences++;
+        findings.occurrences++; seen.add('withFindings');
         const verdict = verdicts.get(id);
-        if (!verdict) { findings.unadjudicated++; continue; }
-        findings.adjudicated++; findings[verdict.verdict]++;
-        if (verdict.verdict === 'discard') { if (finding.status === 'agreed') findings.agreedDiscarded++; continue; }
+        if (!verdict) { findings.unadjudicated++; seen.add('withUnadjudicated'); continue; }
+        findings.adjudicated++; findings[verdict.verdict]++; seen.add('withAdjudicatedFindings');
+        seen.add({ confirm: 'withConfirm', modify: 'withModify', discard: 'withDiscard' }[verdict.verdict]);
+        if (verdict.verdict === 'discard') {
+          if (finding.status === 'agreed') { findings.agreedDiscarded++; seen.add('withAgreedDiscarded'); }
+          continue;
+        }
         seen.add('withAcceptedFindings');
         if (finding.severity === 'blocking') { findings.acceptedBlocking++; seen.add('withAcceptedBlocking'); }
         if (verdict.fixed === true) {
@@ -207,14 +214,18 @@ export function renderMarkdown(report) {
   const cohorts = Object.entries(report.workflows), c = report.coverage, s = report.standalone;
   const metrics = [
     ['Raw workflow runs', r => r.runs], ['Runs with verdicts', r => r.runsContaining.withVerdicts],
-    ['Rounds', r => r.rounds.total ?? 0], ['Attempts / failures', r => `${r.attempts} / ${r.failedAttempts}`],
+    ['Rounds / runs with rounds', r => `${r.rounds.total ?? 0} / ${r.runsContaining.withRounds}`], ['Attempts / failures', r => `${r.attempts} / ${r.failedAttempts}`],
+    ['Runs with attempts', r => r.runsContaining.withAttempts],
     ['Runs with failed attempts', r => r.runsContaining.withFailures], ['Finding occurrences / adjudicated', r => `${r.findings.occurrences} / ${r.findings.adjudicated}`],
     ['Confirm / modify / discard', r => `${r.findings.confirm} / ${r.findings.modify} / ${r.findings.discard}`],
+    ['Runs with findings / adjudicated findings', r => `${r.runsContaining.withFindings} / ${r.runsContaining.withAdjudicatedFindings}`],
+    ['Runs with confirm / modify / discard', r => `${r.runsContaining.withConfirm} / ${r.runsContaining.withModify} / ${r.runsContaining.withDiscard}`],
     ['Runs with accepted findings', r => r.runsContaining.withAcceptedFindings], ['Accepted blocking occurrences / runs', r => `${r.findings.acceptedBlocking} / ${r.runsContaining.withAcceptedBlocking}`],
     ['Recorded fixed occurrences / runs', r => `${r.findings.recordedFixed} / ${r.runsContaining.withRecordedFixes}`],
     ['Recorded blocking fixes / runs', r => `${r.findings.recordedFixedBlocking} / ${r.runsContaining.withRecordedBlockingFixes}`],
-    ['Backend-agreed occurrences discarded', r => r.findings.agreedDiscarded],
+    ['Backend-agreed occurrences discarded / runs', r => `${r.findings.agreedDiscarded} / ${r.runsContaining.withAgreedDiscarded}`],
     ['Unadjudicated findings / unmatched verdicts', r => `${r.findings.unadjudicated} / ${r.findings.unmatchedVerdicts}`],
+    ['Runs with unadjudicated findings / unmatched verdicts', r => `${r.runsContaining.withUnadjudicated} / ${r.runsContaining.withUnmatchedVerdicts}`],
   ];
   const timing = cohorts.flatMap(([name, r]) => [[`${name}: recorded attempt seconds`, r.recordedAttemptSeconds], [`${name}: wall elapsed seconds`, r.wallElapsedSeconds]]);
   timing.push(['standalone: recorded stage seconds', s.recordedStageSeconds], ['standalone: wall elapsed seconds', s.wallElapsedSeconds]);
