@@ -12,11 +12,11 @@
 Cross-agent review for plans, code, and pull requests.
 Your coding agent coordinates two reviewers, verifies findings in plan and code workflows, and asks before pushing.
 
-**Cross Debate workflows require a Git repository.** Non-Git directories do not receive automatic reviews.
+**Cross Debate workflows require a Git repository.** Explicit plan reviews are an exception; non-Git directories do not receive automatic reviews.
 
 ## Install
 
-You need macOS or Linux, **Node 22+**, a Git repository, and at least one signed-in reviewer CLI on `PATH`: `claude`, `codex`,
+You need macOS or Linux, **Node 22+**, a Git repository for automatic reviews, and at least one signed-in reviewer CLI on `PATH`: `claude`, `codex`,
 or `opencode`. One CLI is supported; identical reviewer choices limit model diversity.
 GitHub PR reviews also need authenticated `gh`.
 
