@@ -39,7 +39,7 @@ afterEach(() => {
   fs.rmSync(home, { recursive: true, force: true });
 });
 
-const doctor = () => spawnSync(process.execPath, [cli, 'setup', 'doctor', '--cwd', repo], { encoding: 'utf8' });
+const doctor = (...args) => spawnSync(process.execPath, [cli, 'setup', 'doctor', '--cwd', repo, ...args], { encoding: 'utf8' });
 function project(lanes, { trust = false } = {}) {
   const text = JSON.stringify({ version: 'delegate-fleet.v1', lanes });
   write(projectFile, text);
@@ -90,4 +90,48 @@ test('prospective global settings replace existing globals without writing and r
   fs.rmSync(globalFile);
   assert.equal((await reviewerReadiness(repo, { globalConfig: fleet('claude'), seats: ['codex'] })).ok, true);
   assert.equal(fs.existsSync(globalFile), false, 'a fresh installation can check its settings before creating the config');
+});
+
+test('selected-host doctor checks only its effective plan lane and hook definitions', () => {
+  const config = fleet('claude');
+  config.lanes['plan-main-codex'] = { implementer: 'codex' };
+  write(globalFile, JSON.stringify(config));
+  const result = doctor('--agent', 'claude');
+  assert.equal(result.status, 0, result.stderr);
+  assert.match(result.stdout, /✓ reviewer CLIs: claude/);
+  assert.match(result.stdout, /supported.*diversity/);
+  assert.match(result.stdout, /hooks claude:/);
+  assert.doesNotMatch(result.stdout, /hooks (codex|cursor|opencode):|lane plan-main-codex:|seat codex:/);
+  assert.match(result.stdout, /sign-in: unverified/);
+  assert.equal(doctor().status, 1, 'all-host mode still checks the missing Codex reviewer');
+  const invalid = doctor('--agent', 'unknown');
+  assert.equal(invalid.status, 2);
+  assert.match(invalid.stdout, /--agent must be/);
+});
+
+test('doctor reports enrollment and Codex manual settings without parsing TOML', () => {
+  write(path.join(home, '.codex/config.toml'), 'deliberately invalid TOML');
+  let result = doctor('--agent', 'codex');
+  assert.equal(result.status, 0, result.stderr);
+  assert.match(result.stdout, /project enrollment: not enrolled; automatic guards inactive/);
+  assert.match(result.stdout, /scope enable --cwd/);
+  assert.match(result.stdout, /does not parse config.toml or verify native trust/);
+  assert.match(result.stdout, /features.hooks = true.*sandbox_workspace_write.writable_roots/);
+  assert.ok(result.stdout.includes(process.env.DEBATE_HOME));
+  assert.equal(spawnSync(git, ['-C', repo, 'config', '--local', 'debate.enabled', 'true']).status, 0);
+  result = doctor('--agent', 'codex');
+  assert.match(result.stdout, /project enrollment: enrolled; automatic guards active/);
+  assert.doesNotMatch(result.stdout, /attach project:/);
+  result = doctor('--agent', 'codex', '--cwd', home);
+  assert.match(result.stdout, /outside Git; explicit reviews only/);
+});
+
+test('doctor attachment command preserves shell-sensitive paths', () => {
+  const renamed = `${repo} 'quoted' $(false)`;
+  fs.renameSync(repo, renamed); repo = renamed;
+  fs.symlinkSync(process.execPath, path.join(home, 'bin/node'));
+  const command = doctor('--agent', 'claude').stdout.split('\n').find(line => line.includes('attach project:')).split('in your terminal: ')[1];
+  const result = spawnSync('/bin/sh', ['-c', command], { encoding: 'utf8' });
+  assert.equal(result.status, 0, result.stderr);
+  assert.equal(JSON.parse(result.stdout).enabled, true);
 });
