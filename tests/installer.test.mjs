@@ -7,6 +7,7 @@ import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { parse } from '@rainbowatcher/toml-edit-js';
 import { install, prepareInstall, applyInstall, mergeCodex } from '../bin/cross-debate.mjs';
+import { shellQuote } from '../skills/cross-debate/scripts/lib/common.mjs';
 
 const originalEnv = { ...process.env };
 const git = spawnSync('which', ['git'], { encoding: 'utf8' }).stdout.trim();
@@ -208,6 +209,53 @@ test('custom reviewers validate model input and persist models and reasoning eff
   assert.equal(await install(ui, home), 0);
   assert.deepEqual(json(config).lanes['review-main'], { implementer: 'codex', model: 'example-codex', effort: 'high' });
   assert.deepEqual(json(config).lanes['plan-main'], { implementer: 'claude', model: 'example-claude', effort: 'medium' });
+});
+
+for (const host of ['claude', 'codex', 'cursor', 'opencode']) test(`${host} wizard explains scope and usage before Apply and provides a runnable handoff`, async () => {
+  assert.equal(spawnSync(git, ['init', '-q', home]).status, 0);
+  const notes = [];
+  const attached = ['claude', 'codex'].includes(host);
+  const ui = { intro() {}, outro() {}, log: { info() {} }, isCancel: () => false,
+    multiselect: async () => [host], select: async () => 'default', note: (text, title) => notes.push({ text, title }),
+    confirm: async ({ message }) => {
+      if (message.startsWith('Enable automatic')) return attached;
+      assert.match(notes.at(-1).text, /installed globally.*separate project enrollment/);
+      assert.match(notes.at(-1).text, /consume.*providers' usage/);
+      return true;
+    }, cancel: message => assert.fail(message) };
+  assert.equal(await install(ui, home), 0);
+  const next = notes.find(note => note.title === 'Next').text;
+  assert.match(next, /Installed cross-debate 0\.1\.0/);
+  assert.ok(next.includes(`Project: ${attached ? 'attached' : 'not attached'}`));
+  assert.match(next, /First review prompt: Use cross-debate/);
+  assert.match(next, /Restart your agent/);
+  if (host === 'codex') assert.match(next, /trust the new hooks/);
+  if (!attached) assert.match(next, /request reviews explicitly; experimental hooks gate Git only/);
+  const hostHome = host === 'opencode' ? path.join(home, '.config/opencode') : path.join(home, `.${host}`);
+  const installed = path.join(hostHome, 'skills/cross-debate/scripts/debate.mjs');
+  assert.ok(next.includes(`node ${shellQuote(installed)} setup doctor --agent ${host}`));
+  const result = spawnSync(process.execPath, [installed, 'setup', 'doctor', '--agent', host, '--cwd', home], { encoding: 'utf8' });
+  assert.equal(result.status, 0, result.stderr);
+  assert.match(result.stdout, new RegExp(`✓ hooks ${host}: definition marker found`));
+});
+
+test('handoff reports disabled automation and safely quotes a shell-sensitive project path', async () => {
+  const repo = path.join(home, "project 'quoted' $(false) `false`");
+  assert.equal(spawnSync(git, ['init', '-q', repo]).status, 0);
+  write(path.join(home, 'state/off'), '');
+  fs.symlinkSync(process.execPath, path.join(home, 'bin/node'));
+  const notes = [];
+  const ui = { intro() {}, outro() {}, log: { info() {} }, isCancel: () => false,
+    multiselect: async () => ['claude'], select: async () => 'default', confirm: async () => true,
+    note: (text, title) => notes.push({ text, title }), cancel: message => assert.fail(message) };
+  assert.equal(await install(ui, repo), 0);
+  const next = notes.find(note => note.title === 'Next').text;
+  assert.match(next, /attached; automatic guards inactive/);
+  assert.doesNotMatch(next, /reviews run automatically/);
+  const command = next.split('\n').find(line => line.startsWith('node '));
+  const result = spawnSync('/bin/sh', ['-c', command], { encoding: 'utf8' });
+  assert.equal(result.status, 0, result.stderr);
+  assert.match(result.stdout, /project enrollment: enrolled; automatic guards inactive/);
 });
 
 test('Codex merge handles dotted keys and inline features, rejecting unsupported inline roots', () => {
