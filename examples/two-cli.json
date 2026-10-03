@@ -1,0 +1,9 @@
+{
+  "version": "delegate-fleet.v1",
+  "lanes": {
+    "plan-main": { "implementer": "codex" },
+    "plan-debate": { "implementer": "claude" },
+    "review-main": { "implementer": "claude" },
+    "review-debate": { "implementer": "codex" }
+  }
+}

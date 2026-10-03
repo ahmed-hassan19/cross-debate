@@ -1,0 +1,9 @@
+{
+  "version": "delegate-fleet.v1",
+  "lanes": {
+    "plan-main": { "implementer": "opencode", "model": "provider/model-id", "variant": "variant-name" },
+    "plan-debate": { "implementer": "codex" },
+    "review-main": { "implementer": "codex" },
+    "review-debate": { "implementer": "opencode", "model": "provider/model-id", "variant": "variant-name" }
+  }
+}
