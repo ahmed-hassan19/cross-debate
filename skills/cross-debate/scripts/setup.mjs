@@ -24,8 +24,8 @@ Usage:
 init walks you through reviewer lanes (CLI, model, effort), host hooks and the optional skills (ponytail,
 babysit-pr), then runs doctor. Run it once after installing, in your own terminal.
 Automatic reviews run in every Git repository by default and use reviewer-provider quota. Use scope disable --cwd <dir> to opt out.
-Reviewer 1 finds possible code issues; Reviewer 2 challenges them and can add missed issues. Both review plans independently.
-Choose different CLIs or model families when available. Model lists are catalog suggestions, not access checks.
+The Lead reviewer finds code issues and makes the final call; the Challenger questions those findings and adds missed
+issues. On plans, each gives an independent opinion. Use your most capable model for the Lead and a different family for the Challenger. Model lists are catalog suggestions, not access checks.
 lanes proposes only lanes missing from the global delegate-skills config (plan-main[-<seat>], plan-debate,
 review-main, review-debate) for the reviewer CLIs on PATH. hooks prints the exact entries for one agent.
 --write shows the change and asks y/N; it needs an interactive terminal and keeps a *.debate-bak backup.
