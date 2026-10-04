@@ -38,11 +38,11 @@ final call on which findings are real; on plans it gives the second independent 
 capable, deep-thinking model with high effort. The **Challenger** questions the Lead's findings and adds missed
 problems; on plans it gives the first independent opinion. Best fit: a capable model from a different family than
 the Lead, such as Codex when the Lead is Claude; very small models tend to just agree. Model menus start with **CLI default**,
-show at most one catalog suggestion per family plus your existing choice, and end with **Enter another model**.
-OpenCode uses `provider/model`. Claude uses the [Models API](https://platform.claude.com/docs/en/api/models/list)
-only with an existing `ANTHROPIC_API_KEY`, otherwise aliases; Codex uses its
+show the newest model of each family plus your existing choice, and end with **Enter another model**.
+OpenCode uses `provider/model`. Claude Code lists your account's models through its
+[initialize control request](https://code.claude.com/docs/en/agent-sdk/typescript) in safe mode; Codex uses its
 [local app-server catalog](https://developers.openai.com/siwc/token-sharing-open-source/codex-app-server).
-Discovery starts no review turn and does not verify account access.
+Discovery starts no review turn; if a CLI can't list models, the menu shows built-in versioned IDs.
 
 ## Verify
 

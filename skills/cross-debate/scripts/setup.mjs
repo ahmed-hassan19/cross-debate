@@ -25,7 +25,7 @@ init walks you through reviewer lanes (CLI, model, effort), host hooks and the o
 babysit-pr), then runs doctor. Run it once after installing, in your own terminal.
 Automatic reviews run in every Git repository by default and use reviewer-provider quota. Use scope disable --cwd <dir> to opt out.
 The Lead reviewer finds code issues and makes the final call; the Challenger questions those findings and adds missed
-issues. On plans, each gives an independent opinion. Use your most capable model for the Lead and a different family for the Challenger. Model lists are catalog suggestions, not access checks.
+issues. On plans, each gives an independent opinion. Use your most capable model for the Lead and a different family for the Challenger.
 lanes proposes only lanes missing from the global delegate-skills config (plan-main[-<seat>], plan-debate,
 review-main, review-debate) for the reviewer CLIs on PATH. hooks prints the exact entries for one agent.
 --write shows the change and asks y/N; it needs an interactive terminal and keeps a *.debate-bak backup.
@@ -463,7 +463,7 @@ async function fleetStep(ask, available) {
     else {
       if (!catalogs.has(implementer)) catalogs.set(implementer, await discoverModelCatalog(implementer));
       const choices = modelMenu(implementer, catalogs.get(implementer), kept.model).map(option => option.value === 'default' ? 'CLI default' : option.value === 'other' ? 'Enter another model' : option.value);
-      const selected = pick(ask, `${name} model (catalog suggestions; access not verified)`, {
+      const selected = pick(ask, `${name} model`, {
         choices, def: kept.model ?? 'CLI default',
       });
       model = selected === 'CLI default' ? 'default' : selected === 'Enter another model'
