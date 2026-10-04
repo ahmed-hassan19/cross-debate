@@ -33,8 +33,11 @@ have an explicit opt-out.
 The installer preserves unrelated settings and backs up replaced entries.
 Restart your agent. In Codex, review and accept the hook-trust prompt.
 
-Reviewer 1 finds possible code issues. Reviewer 2 challenges them and can add missed issues; both review plans
-independently. Choose different CLI or model families when available. Model menus start with **CLI default**,
+The installer asks for two reviewers. The **Lead reviewer** reviews code and pull requests first and makes the
+final call on which findings are real; on plans it gives the second independent opinion. Best fit: your most
+capable, deep-thinking model with high effort. The **Challenger** questions the Lead's findings and adds missed
+problems; on plans it gives the first independent opinion. Best fit: a capable model from a different family than
+the Lead, such as Codex when the Lead is Claude; very small models tend to just agree. Model menus start with **CLI default**,
 show at most one catalog suggestion per family plus your existing choice, and end with **Enter another model**.
 OpenCode uses `provider/model`. Claude uses the [Models API](https://platform.claude.com/docs/en/api/models/list)
 only with an existing `ANTHROPIC_API_KEY`, otherwise aliases; Codex uses its
