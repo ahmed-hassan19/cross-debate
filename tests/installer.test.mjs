@@ -59,13 +59,18 @@ test('cancelling at the Apply prompt leaves the fresh home untouched', async () 
 test('installer summary explains default-on usage and preserves an existing project opt-out', async () => {
   assert.equal(spawnSync(git, ['init', '-q', home]).status, 0);
   assert.equal(spawnSync(git, ['-C', home, 'config', '--local', 'debate.enabled', 'false']).status, 0);
-  const notes = [];
+  const notes = {};
   const ui = { intro() {}, outro() {}, log: { info() {} }, isCancel: () => false,
-    note: message => notes.push(message), multiselect: async () => ['claude', 'codex'], select: async () => 'default',
+    note: (text, title) => { notes[title] = text; }, multiselect: async () => ['claude', 'codex'], select: async () => 'default',
     confirm: async () => true, cancel: message => assert.fail(message) };
   assert.equal(await install(ui, home), 0);
-  assert.match(notes.join('\n'), /Automatic reviews run in every Git project by default and consume reviewer-provider usage/);
-  assert.match(notes.join('\n'), /explicit opt-out/);
+  assert.match(notes['Ready to install'], /Automatic reviews run in every Git project by default and consume reviewer-provider usage/);
+  assert.match(notes['Ready to install'], /explicit opt-out/);
+  assert.match(notes['Ready to install'], /You can turn reviews off for any project after installing/);
+  const lines = notes.Next.split('\n');
+  const enable = lines.findIndex(line => line.includes('scope enable --cwd'));
+  const disable = lines.findIndex(line => line.includes('scope disable --cwd'));
+  assert.ok(enable >= 0 && enable < disable, 'an opted-out project sees how to turn reviews back on first');
   assert.equal(spawnSync(git, ['-C', home, 'config', '--local', '--get', 'debate.enabled'], { encoding: 'utf8' }).stdout.trim(), 'false');
 });
 
@@ -207,22 +212,79 @@ test('the summary shows effective trusted project reviewers, including a replace
     note: text => notes.push(text), multiselect: async () => ['claude'], select: async () => 'default',
     confirm: async () => true, cancel: message => assert.fail(message) };
   assert.equal(await install(ui, home), 0);
-  assert.match(notes.join('\n'), /Plan reviewers: claude \/ project-reviewer \(project override\)/);
+  const summary = notes.join('\n');
+  assert.match(summary, /^Challenger: {4}claude \/ CLI default model \(plans: claude \/ project-reviewer \(project override\)\)$/m);
+  assert.match(summary, /^Lead reviewer: claude \/ CLI default model$/m);
   assert.equal(json(config).lanes['plan-main'].implementer, 'codex', 'the shared global lane remains unchanged');
+});
+
+test('the summary shows a Lead reviewer plan lane that differs from its code lane', async () => {
+  const global = structuredClone(fleet);
+  global.lanes['plan-debate'] = { implementer: 'claude', model: 'opus', effort: 'high' };
+  write(config, JSON.stringify(global));
+  const notes = {};
+  const ui = { intro() {}, outro() {}, log: { info() {} }, isCancel: () => false,
+    note: (text, title) => { notes[title] = text; }, multiselect: async () => ['claude'], select: async () => 'default',
+    confirm: async () => false, cancel() {} };
+  assert.equal(await install(ui, home), 0);
+  assert.match(notes['Ready to install'], /^Lead reviewer: claude \/ CLI default model \(plans: claude \/ opus \/ high\)$/m);
+  assert.match(notes['Ready to install'], /^Challenger: {4}codex \/ CLI default model$/m);
+  assert.doesNotMatch(notes['Ready to install'], /→|same model/);
+});
+
+for (const [name, setup, expected] of [
+  ['a fresh install with two CLIs', () => {}, /^Use claude \+ codex with their default models\. Claude Code leads, Codex challenges\.$/],
+  ['a fresh install with one CLI', () => fs.rmSync(path.join(home, 'bin/claude')), /^Use codex for both roles \(works, but two model families catch more\)\.$/],
+  ['existing reviewer settings', () => write(config, JSON.stringify(fleet)), /^Keep my current reviewers$/],
+]) test(`the default reviewer option describes ${name}`, async () => {
+  setup();
+  let label;
+  const ui = { intro() {}, note() {}, outro() {}, log: { info() {} }, isCancel: () => false, multiselect: async () => ['claude'],
+    select: async ({ options }) => { label = options[0].label; return 'default'; }, confirm: async () => false, cancel() {} };
+  assert.equal(await install(ui, home), 0);
+  assert.match(label, expected);
+});
+
+test('custom prompts name each role, give tier advice, and recommend no OpenCode variant level', async () => {
+  write(path.join(home, 'bin/opencode'), '#!/bin/sh\nprintf called > "$HOME/cli-called"\nexit 99\n');
+  fs.chmodSync(path.join(home, 'bin/opencode'), 0o755);
+  const selections = ['custom', 'claude', 'default', 'opencode'];
+  const answers = ['high', 'provider/model', ''];
+  const selects = [], texts = [];
+  const ui = { intro() {}, note() {}, outro() {}, log: { info() {} }, isCancel: () => false,
+    multiselect: async () => ['claude'], confirm: async () => true, cancel: message => assert.fail(message),
+    select: async ({ message }) => { selects.push(message); return selections.shift(); },
+    text: async options => { texts.push(options.message); const value = answers.shift(); assert.equal(options.validate(value), undefined); return value; } };
+  assert.equal(await install(ui, home), 0);
+  assert.deepEqual(selects.slice(1), [
+    'Lead reviewer: which CLI? Your most capable, deep-thinking model works best here.',
+    'Lead reviewer model (catalog suggestions; access is not verified)',
+    'Challenger: which CLI? A different model family from the Lead works best here.',
+  ]);
+  assert.deepEqual(texts, [
+    'Lead reviewer effort: low, medium, high, xhigh, max, or ultracode (high recommended; Enter for the CLI default)',
+    'Challenger model: OpenCode provider/model',
+    'Challenger variant: a provider-specific name from your OpenCode config (Enter for the default)',
+  ]);
+  assert.deepEqual(json(config).lanes['review-debate'], { implementer: 'opencode', model: 'provider/model' });
 });
 
 test('custom reviewers validate model input and persist models and reasoning effort', async () => {
   const selections = ['custom', 'codex', 'other', 'claude', 'other'];
   const answers = ['example-codex', 'high', 'example-claude', 'medium'];
+  const texts = [];
   const ui = { intro() {}, note() {}, outro() {}, log: { info() {} }, isCancel: () => false,
     multiselect: async () => ['codex'], select: async () => selections.shift(), confirm: async () => true,
     text: async options => {
+      texts.push(options.message);
       if (options.message.includes('model')) assert.ok(options.validate('invalid model with spaces'));
       const value = answers.shift(); assert.equal(options.validate(value), undefined); return value;
     }, cancel: message => assert.fail(message) };
   assert.equal(await install(ui, home), 0);
   assert.deepEqual(json(config).lanes['review-main'], { implementer: 'codex', model: 'example-codex', effort: 'high' });
   assert.deepEqual(json(config).lanes['plan-main'], { implementer: 'claude', model: 'example-claude', effort: 'medium' });
+  assert.ok(texts.includes('Lead reviewer effort: for example low, medium, high, or xhigh (high recommended; Enter for the CLI default)'));
+  assert.ok(texts.includes('Challenger effort: low, medium, high, xhigh, max, or ultracode (medium or high recommended; Enter for the CLI default)'));
 });
 
 for (const host of ['claude', 'codex', 'cursor', 'opencode']) test(`${host} wizard explains scope and usage before Apply and provides a runnable handoff`, async () => {
@@ -233,6 +295,9 @@ for (const host of ['claude', 'codex', 'cursor', 'opencode']) test(`${host} wiza
     confirm: async () => { assert.match(notes.at(-1).text, /Automatic reviews run in every Git project by default and consume reviewer-provider usage/); return true; },
     cancel: message => assert.fail(message) };
   assert.equal(await install(ui, home), 0);
+  const intro = notes.find(note => note.title === 'Meet your two reviewers').text;
+  for (const phrase of ['Lead reviewer', 'Challenger', 'deep thinking']) assert.ok(intro.includes(phrase), phrase);
+  assert.doesNotMatch(intro, /Reviewer 1/);
   const next = notes.find(note => note.title === 'Next').text;
   assert.match(next, /Installed cross-debate 0\.1\.0/);
   assert.match(next, /Current directory: Git repository; automatic reviews on/);
@@ -265,6 +330,14 @@ test('handoff reports disabled automation and safely quotes a shell-sensitive pr
   const result = spawnSync('/bin/sh', ['-c', command], { encoding: 'utf8' });
   assert.equal(result.status, 0, result.stderr);
   assert.match(result.stdout, /automatic reviews: on: Git default \(session off\)/);
+  assert.match(next, /Automatic reviews are on by default in Git projects; existing opt-outs stay in effect/);
+  const optOut = next.split('\n').find(line => line.trim().startsWith('npx ') && line.includes('scope disable --cwd'));
+  assert.ok(optOut.endsWith(`--cwd ${shellQuote(repo)}`));
+  const runnable = optOut.trim().replace('npx --yes github:ahmed-hassan19/cross-debate', `node ${shellQuote(path.resolve('bin/cross-debate.mjs'))}`);
+  const disabled = spawnSync('/bin/sh', ['-c', runnable], { encoding: 'utf8' });
+  assert.equal(disabled.status, 0, disabled.stderr);
+  const state = JSON.parse(disabled.stdout);
+  assert.equal(state.enabled, false); assert.equal(state.configured, false);
 });
 
 test('Codex merge handles dotted keys and inline features, rejecting unsupported inline roots', () => {

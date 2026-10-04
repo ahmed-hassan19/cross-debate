@@ -5,13 +5,20 @@ preserving unrelated lanes. Settings live in `~/.config/delegate-skills/config.j
 
 A lane names a role; its `implementer` selects the reviewer CLI. Your seat is your host agent.
 
-| Lane | Role |
-|---|---|
-| `plan-main` | First independent plan-review pass |
-| `plan-main-<seat>` | Overrides that first pass for one host |
-| `plan-debate` | Second independent plan-review pass |
-| `review-main` | Main and final code/PR reviewer |
-| `review-debate` | Challenges code/PR findings and can add findings |
+The installer calls the two reviewers the **Lead reviewer** (`review-main` and `plan-debate`) and the
+**Challenger** (`review-debate` and `plan-main`).
+
+| Lane | Installer role | Role |
+|---|---|---|
+| `plan-main` | Challenger | First independent plan-review pass |
+| `plan-main-<seat>` | Challenger | Overrides that first pass for one host |
+| `plan-debate` | Lead reviewer | Second independent plan-review pass |
+| `review-main` | Lead reviewer | Main and final code/PR reviewer |
+| `review-debate` | Challenger | Challenges code/PR findings and can add findings |
+
+Best fit: give the Lead reviewer your most capable, deep-thinking model with high effort, since it does the most
+work. Give the Challenger a capable model from a different family; a lighter model saves usage, but very small
+models tend to just agree.
 
 Omitting `model` uses Claude Code or Codex's CLI default. OpenCode requires an explicit `provider/model`.
 `effort` is the Claude/Codex reasoning dial; `variant` is OpenCode's provider-specific dial. Omit either to
