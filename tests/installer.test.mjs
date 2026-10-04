@@ -29,7 +29,7 @@ beforeEach(() => {
     XDG_CONFIG_HOME: path.join(home, '.config'), DEBATE_HOME: path.join(home, 'state'),
     GIT_CONFIG_GLOBAL: '/dev/null', GIT_CONFIG_SYSTEM: '/dev/null', PATH: path.join(home, 'bin') });
   for (const cli of ['claude', 'codex']) {
-    write(path.join(home, 'bin', cli), '#!/bin/sh\nif [ "$1" != "app-server" ]; then printf called > "$HOME/cli-called"; fi\nexit 99\n');
+    write(path.join(home, 'bin', cli), '#!/bin/sh\ncase "$*" in app-server*|*--no-session-persistence*) ;; *) printf called > "$HOME/cli-called" ;; esac\nexit 99\n');
     fs.chmodSync(path.join(home, 'bin', cli), 0o755);
   }
   fs.symlinkSync(git, path.join(home, 'bin', 'git'));
@@ -258,7 +258,7 @@ test('custom prompts name each role, give tier advice, and recommend no OpenCode
   assert.equal(await install(ui, home), 0);
   assert.deepEqual(selects.slice(1), [
     'Lead reviewer: which CLI? Your most capable, deep-thinking model works best here.',
-    'Lead reviewer model (catalog suggestions; access is not verified)',
+    'Lead reviewer model',
     'Challenger: which CLI? A different model family from the Lead works best here.',
   ]);
   assert.deepEqual(texts, [

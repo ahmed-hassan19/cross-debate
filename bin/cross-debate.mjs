@@ -287,7 +287,7 @@ export async function install(ui = p, cwd = process.cwd()) {
           const existing = current.lanes[role.code];
           const catalog = await discoverModelCatalog(implementer);
           const selection = await ask('select', {
-            message: `${role.name} model (catalog suggestions; access is not verified)`,
+            message: `${role.name} model`,
             options: modelMenu(implementer, catalog, existing?.implementer === implementer ? existing.model : null),
             initialValue: 'default',
           });

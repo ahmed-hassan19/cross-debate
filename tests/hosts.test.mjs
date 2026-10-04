@@ -551,7 +551,7 @@ test('setup init: Enter on every prompt writes exactly the proposed lanes, and n
 
 test('setup init binds the chosen CLI, model and effort, and re-prompts an invalid effort', async () => {
   const ask = scripted([
-    [/^review-main CLI/, ['codex']], [/^review-main model \(/, ['Enter another model']], [/^review-main model ID/, ['gpt-5.5']], [/^review-main effort/, ['high']],
+    [/^review-main CLI/, ['codex']], [/^review-main model\b(?! ID)/, ['Enter another model']], [/^review-main model ID/, ['gpt-5.5']], [/^review-main effort/, ['high']],
     [/^plan-main effort/, ['bogus', 'xhigh']], [/own first plan reviewer/, ['n']], [/Change any/, ['y']], [/Write this change/, ['y']],
   ]);
   const { lanes, xdg } = await init(['claude', 'codex'], ask);
