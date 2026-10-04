@@ -10,12 +10,63 @@ import { initSync, parse, edit } from '@rainbowatcher/toml-edit-js';
 import { hookEntries, mergeHooks, opencodePlugin, buildLane, reviewerReadiness } from '../skills/cross-debate/scripts/setup.mjs';
 import { SKILL_DIR, debateHome, repositoryScope, writeAtomic, skillVersion, shellQuote } from '../skills/cross-debate/scripts/lib/common.mjs';
 import { globalConfigPath, parseConfigDocument } from '../skills/cross-debate/vendor/delegate-skills/delegate-setup/scripts/config.mjs';
+import { CLAUDE_EFFORT } from '../skills/cross-debate/vendor/delegate-skills/delegate-setup/scripts/implementers.mjs';
 import { discoverModelCatalog, modelMenu } from '../skills/cross-debate/scripts/lib/model-catalog.mjs';
 
 const labels = { claude: 'Claude Code', codex: 'Codex', cursor: 'Cursor (experimental)', opencode: 'OpenCode (experimental)' };
 const reviewerCLIs = ['claude', 'codex', 'opencode'];
 const requiredLanes = ['plan-main', 'plan-debate', 'review-main', 'review-debate'];
 const installCommand = 'npx --yes github:ahmed-hassan19/cross-debate';
+const anyOf = values => new Intl.ListFormat('en', { type: 'disjunction' }).format(values);
+const shortLabel = cli => labels[cli].replace(' (experimental)', '');
+// Lead = review-main + plan-debate; Challenger = review-debate + plan-main. Index matches the wizard's pair.
+const roles = [
+  { name: 'Lead reviewer', code: 'review-main', plan: 'plan-debate', effort: 'high',
+    cli: 'Your most capable, deep-thinking model works best here.',
+    about: [
+      'Goes through your code changes and pull requests first and writes down every',
+      'problem it finds. After the Challenger has pushed back, it takes a second look',
+      'and makes the final call on which problems are real. On plans, it gives a',
+      'second, independent opinion.',
+      'Best fit: your most capable model, one built for deep thinking (a frontier or',
+      '"reasoning" model), with high effort. This role does the most work.',
+    ] },
+  { name: 'Challenger', code: 'review-debate', plan: 'plan-main', effort: 'medium or high',
+    cli: 'A different model family from the Lead works best here.',
+    about: [
+      'Plays the skeptic. It questions each of the Lead reviewer\'s findings, flags the',
+      'weak ones, and points out problems the Lead missed. On plans, it gives the first',
+      'independent opinion.',
+      'Best fit: a capable model from a different family than the Lead, for example',
+      'Codex if the Lead is Claude. A fresh perspective catches more than a bigger',
+      'model. A lighter, faster model is fine if you want to save usage, but very small',
+      'models tend to just agree.',
+    ] },
+];
+const rolesNote = [
+  'Cross Debate asks two AI reviewers to look over your work before your agent shows it',
+  'to you. They run in the background, through CLIs you already have signed in.',
+  ...roles.flatMap(role => ['', role.name, ...role.about.map(line => `  ${line}`)]),
+  '',
+  'Effort is how long a model thinks before it answers. Higher effort is more',
+  'thorough but slower, and it uses more of your plan. Press Enter to keep the',
+  'CLI\'s own default.',
+  '',
+  'Your agent then checks every claim against the actual code before acting on it.',
+  'Agreement between the two reviewers is not treated as proof.',
+].join('\n');
+function dialMessage(role, implementer) {
+  if (implementer === 'opencode') return `${role.name} variant: a provider-specific name from your OpenCode config (Enter for the default)`;
+  const levels = implementer === 'claude' ? anyOf(CLAUDE_EFFORT) : `for example ${anyOf(['low', 'medium', 'high', 'xhigh'])}`;
+  return `${role.name} effort: ${levels} (${role.effort} recommended; Enter for the CLI default)`;
+}
+function defaultLabel(complete, available) {
+  if (complete) return 'Keep my current reviewers';
+  const askModel = available.slice(0, 2).includes('opencode') ? ' OpenCode will ask for a model.' : '';
+  if (available.length === 1) return `Use ${available[0]} for both roles (works, but two model families catch more).${askModel}`;
+  const [lead, challenger] = available;
+  return `Use ${lead} + ${challenger} with their default models. ${shortLabel(lead)} leads, ${shortLabel(challenger)} challenges.${askModel}`;
+}
 const version = JSON.parse(fs.readFileSync(new URL('../package.json', import.meta.url), 'utf8')).version;
 const json = value => `${JSON.stringify(value, null, 2)}\n`;
 const stat = file => { try { return fs.lstatSync(file); } catch (e) { if (e.code === 'ENOENT') return null; throw e; } };
@@ -196,7 +247,7 @@ export async function install(ui = p, cwd = process.cwd()) {
     return answer;
   };
   ui.intro('cross-debate · Cross-agent review for plans, code, and pull requests');
-  ui.note('Reviewer 1 finds possible code issues. Reviewer 2 challenges those findings and can add missed issues. Both review plans independently. Choose different CLIs or model families when available.', 'Reviewer roles');
+  ui.note(rolesNote, 'Meet your two reviewers');
   try {
     if (!onPath('git')) throw new Error('Install Git, then rerun cross-debate.');
     const available = reviewerCLIs.filter(onPath);
@@ -215,28 +266,28 @@ export async function install(ui = p, cwd = process.cwd()) {
     const choice = await ask('select', {
       message: 'Who should review your work?',
       options: [
-        { value: 'default', label: complete ? 'Keep my reviewer settings' : `Use ${available.slice(0, 2).join(' + ')} with default models`, hint: 'recommended' },
+        { value: 'default', label: defaultLabel(complete, available), hint: 'recommended' },
         { value: 'custom', label: 'Choose two reviewers and their models' },
       ],
     });
     const pair = [];
     if (!complete || choice === 'custom') {
-      for (let i = 0; i < 2; i++) {
+      for (const [i, role] of roles.entries()) {
         const implementer = choice === 'custom' ? await ask('select', {
-          message: `Reviewer ${i + 1}`, options: available.map(value => ({ value, label: labels[value] })), initialValue: available[i % available.length],
+          message: `${role.name}: which CLI? ${role.cli}`, options: available.map(value => ({ value, label: labels[value] })), initialValue: available[i % available.length],
         }) : available[i % Math.min(2, available.length)];
         let model = 'default';
         if (implementer === 'opencode') model = await ask('text', {
-          message: 'OpenCode model (provider/model)',
+          message: `${role.name} model: OpenCode provider/model`,
           validate: value => !/^[^/\s]+\/\S+$/.test(value || '')
             ? 'Enter the provider/model ID from your OpenCode configuration'
             : laneError(buildLane({ implementer, model: value })),
         });
         else if (choice === 'custom') {
-          const existing = current.lanes[i === 0 ? 'review-main' : 'review-debate'];
+          const existing = current.lanes[role.code];
           const catalog = await discoverModelCatalog(implementer);
           const selection = await ask('select', {
-            message: `${labels[implementer]} model (catalog suggestions; access is not verified)`,
+            message: `${role.name} model (catalog suggestions; access is not verified)`,
             options: modelMenu(implementer, catalog, existing?.implementer === implementer ? existing.model : null),
             initialValue: 'default',
           });
@@ -247,7 +298,7 @@ export async function install(ui = p, cwd = process.cwd()) {
         }
         const dial = implementer === 'opencode' ? 'variant' : 'effort';
         const value = choice === 'custom' ? await ask('text', {
-          message: `${labels[implementer]} ${dial} (Enter for CLI default)`, defaultValue: 'none',
+          message: dialMessage(role, implementer), defaultValue: 'none',
           validate: value => laneError(buildLane({ implementer, model: model || 'default', dial, value: value || 'none' })),
         }) : 'none';
         pair.push(buildLane({ implementer, model: model || 'default', dial, value: value || 'none' }));
@@ -257,7 +308,7 @@ export async function install(ui = p, cwd = process.cwd()) {
     const proposed = { 'plan-main': pair[1], 'plan-debate': pair[0], 'review-main': pair[0], 'review-debate': pair[1] };
     for (const name of requiredLanes) if (choice === 'custom' || !config.lanes[name]) config.lanes[name] = proposed[name];
     if (choice === 'custom') for (const name of Object.keys(config.lanes).filter(n => n.startsWith('plan-main-'))) config.lanes[name] = pair[1];
-    const describe = lane => [lane.implementer, lane.model || 'CLI default', lane.effort || lane.variant].filter(Boolean).join(' / ') + (lane.source === 'project' ? ' (project override)' : '');
+    const describe = lane => [lane.implementer, lane.model || 'CLI default model', lane.effort || lane.variant].filter(Boolean).join(' / ') + (lane.source === 'project' ? ' (project override)' : '');
     const scope = repositoryScope(cwd);
     const readiness = await reviewerReadiness(cwd, { globalConfig: config, seats: hosts });
     if (!readiness.ok) throw new Error(readiness.checks.filter(check => !check.ok).map(check => check.error).join('\n'));
@@ -265,19 +316,25 @@ export async function install(ui = p, cwd = process.cwd()) {
     const lanes = readiness.lanes;
     const compact = file => file.startsWith(`${os.homedir()}/`) ? `~/${file.slice(os.homedir().length + 1)}` : file;
     const repeat = (a, b) => a.implementer === b.implementer && a.model === b.model;
-    const warnings = hosts.filter(h => repeat(lanes[`plan-main-${h}`] || lanes['plan-main'], lanes['plan-debate']))
-      .map(h => `${labels[h]}: both plan reviewers use the same CLI and model.`);
-    if (repeat(lanes['review-main'], lanes['review-debate'])) warnings.push('Both code reviewers use the same CLI and model.');
+    const sameModel = [
+      ...(repeat(lanes['review-main'], lanes['review-debate']) ? ['code'] : []),
+      ...hosts.filter(h => repeat(lanes[`plan-main-${h}`] || lanes['plan-main'], lanes['plan-debate'])).map(h => `${labels[h]} plans`),
+    ];
+    const roleLine = role => {
+      const code = lanes[role.code], plan = lanes[role.plan];
+      const same = ['implementer', 'model', 'effort', 'variant', 'source'].every(key => code[key] === plan[key]);
+      return `${role.name}:`.padEnd(15) + describe(code) + (same ? '' : ` (plans: ${describe(plan)})`);
+    };
     ui.note([
       `Hosts: ${hosts.map(h => labels[h]).join(', ')}`,
-      `Plan reviewers: ${describe(lanes['plan-main'])} → ${describe(lanes['plan-debate'])}`,
-      `Code reviewers: ${describe(lanes['review-main'])} → ${describe(lanes['review-debate'])}`,
-      ...hosts.filter(h => lanes[`plan-main-${h}`]).map(h => `${labels[h]} first plan reviewer: ${describe(lanes[`plan-main-${h}`])}`),
-      ...warnings,
+      ...roles.map(roleLine),
+      ...hosts.filter(h => lanes[`plan-main-${h}`]).map(h => `${labels[h]} plans: first opinion from ${describe(lanes[`plan-main-${h}`])}`),
+      ...(sameModel.length ? [`The Lead reviewer and Challenger use the same model (${sameModel.join(', ')}), so they'll tend to make the same mistakes. Pick different families if you can.`] : []),
       ...(plan.retainedHosts.length ? [`Keeping the legacy debate registration for ${plan.retainedHosts.join(', ')}. Select those hosts on a later run to finish migration.`] : []),
       `Current directory: ${scope.identity ? `${compact(scope.identity.worktreeRoot)} (${scope.warnings.length ? scope.warnings.join('; ') : scope.enabled ? 'automatic reviews on' : 'explicit opt-out'})` : 'not a Git repository; no automatic reviews here'}`,
       'Automatic reviews run in every Git project by default and consume reviewer-provider usage.',
       'Updating activates existing Git projects unless they already have an explicit opt-out.',
+      'You can turn reviews off for any project after installing.',
       '', 'Files to install or update:', ...plan.changes.map(change => compact(change.file)),
       '', 'Existing entries are backed up. Reviewer sign-in is not checked.',
     ].join('\n'), 'Ready to install');
@@ -286,6 +343,14 @@ export async function install(ui = p, cwd = process.cwd()) {
     if (backup) ui.log.info(`Backups: ${backup}`);
     const automaticHosts = hosts.filter(host => host === 'claude' || host === 'codex');
     const effective = repositoryScope(cwd).effective;
+    const scopeCommand = action => `  ${installCommand} scope ${action} --cwd ${shellQuote(scope.identity.worktreeRoot)}`;
+    const disableHint = () => ['To turn them off for one project:', scopeCommand('disable')];
+    const optOut = !scope.identity ? [] : [
+      'Automatic reviews are on by default in Git projects; existing opt-outs stay in effect.',
+      ...(scope.configured === false
+        ? ['This project is opted out. To turn reviews back on here:', scopeCommand('enable'), ...disableHint()]
+        : [...disableHint(), 'Turn them back on with "scope enable".']),
+    ];
     ui.note([
       `Installed cross-debate ${version} for ${hosts.map(host => labels[host]).join(', ')}.`,
       `Current directory: ${scope.identity ? `Git repository; automatic reviews ${effective ? 'on' : 'off'}` : 'not a Git repository; no automatic reviews'}.`,
@@ -294,7 +359,7 @@ export async function install(ui = p, cwd = process.cwd()) {
       'Verify from your project directory:',
       ...hosts.map(host => `node ${shellQuote(path.join(homes[host], 'skills', 'cross-debate', 'scripts', 'debate.mjs'))} setup doctor --agent ${host} --cwd ${shellQuote(cwd)}`),
       ...(effective && automaticHosts.length ? [`In ${automaticHosts.map(host => labels[host]).join(' and ')}, enter plan mode and describe your task. Plan and code reviews run automatically.`] : []),
-      ...(scope.identity ? ['Use scope disable --cwd /path/to/project to opt out; scope enable reverses it.'] : []),
+      ...optOut,
       'First review prompt: Use cross-debate to review a plan for adding a small regression test in this project.',
       ...(hosts.some(host => host === 'cursor' || host === 'opencode') ? ['Cursor/OpenCode: request reviews explicitly; experimental hooks gate Git only.'] : []),
       'Expect reviewer findings, the agent\'s verified decisions, and a review outcome. Sign-in and native hook execution still need an interactive check.',
