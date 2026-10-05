@@ -48,6 +48,24 @@ Stats-only coverage: 0 runs (none). These lack raw finding joins and are exclude
 | Unadjudicated findings / unmatched verdicts | 18 / 0 | 0 / 0 |
 | Runs with unadjudicated findings / unmatched verdicts | 2 / 0 | 0 / 0 |
 
+## Rates and measured changes
+
+| Measure | Plan | Code |
+| --- | --- | --- |
+| Passed or completed outcome | 79 of 92 (86%) | 125 of 144 (87%) |
+| Runs with verdicts that accepted findings | 80 of 81 (99%) | 43 of 135 (32%) |
+| Runs with verdicts that accepted blocking findings | 32 of 81 (40%) | 14 of 135 (10%) |
+| Runs with verdicts that fixed blocking findings | not recorded | 11 of 135 (8%) |
+| Adjudicated findings accepted (confirm or modify) | 461 of 490 (94%) | 94 of 112 (84%) |
+| Adjudicated findings discarded | 29 of 490 (6%) | 18 of 112 (16%) |
+| Accepted findings marked fixed | not recorded | 55 of 94 (59%) |
+| Accepted blocking findings marked fixed | not recorded | 31 of 40 (78%) |
+| Reviewer rating, first → last round (median) | 6 → 8 | n/a |
+| Multi-round runs whose rating improved / unchanged / declined | 81% / 19% / 0% of 52 | n/a |
+| Multi-round runs rated 8+, first → last round | 25% → 96% of 52 | n/a |
+
+Rates use the counts above; denominators are shown in each cell. Ratings are the reviewers' combined score (the lower of the two) for the plan text each round reviewed. A later round reviews the revised plan, so a rise reflects revisions made after review, scored by reviewers who saw the earlier round; it is not an independent quality measure. Runs with fewer than two rated rounds are excluded from rating rows. Plan change prose is not a recorded fix, so plan fix rates are not recorded.
+
 plan: recorded statuses: running: 1; awaiting_verdict: 2; stopped: 3; review_failed: 1; finished: 85. Recorded outcomes: completed: 79; failed: 6; missing: 7.
 
 plan: review states: failed: 11; unfinished: 3; changedAfterReview: 68; finishedWithVerdict: 10. Attempt states: running: 1; completed: 147; failed: 33.

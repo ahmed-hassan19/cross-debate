@@ -119,13 +119,20 @@ See [operations](skills/cross-debate/references/operations.md) for limitations a
 One maintainer's changing workflows, frozen on October 3, 2026. Finding occurrences can repeat across rounds;
 these counts do not represent unique bugs or a comparison against another review method.
 
-| Recorded measure | Count |
+| Recorded measure | Result |
 |---|---|
 | Workflow runs | 236 (92 plan, 144 code) |
-| Code runs with accepted findings | 43 of 135 with orchestrator verdicts |
-| Findings marked fixed in code verdicts | 55 occurrences across 18 runs |
-| Blocking findings marked fixed | 31 occurrences across 11 runs |
-| Backend-agreed findings discarded by the orchestrator | 17 occurrences |
+| Plan rating, first → last round | Median 6 → 8 of 10 across 52 multi-round plans; 81% improved, none declined |
+| Plans rated 8 or higher | 25% at first review → 96% after revision (of those 52) |
+| Plan runs with accepted findings | 80 of 81 with orchestrator verdicts (99%) |
+| Code runs with accepted findings | 43 of 135 with orchestrator verdicts (32%) |
+| Code runs that fixed a blocking finding before completion | 11 of 135 (8%) |
+| Accepted code findings marked fixed | 55 of 94 occurrences (59%) across 18 runs |
+| Accepted blocking code findings marked fixed | 31 of 40 occurrences (78%) across 11 runs |
+| Findings the orchestrator discarded after checking | 16% of code and 6% of plan findings; includes 17 code findings both reviewers agreed on |
+
+On the review brief's scale, 5–6 means one blocking gap and 7–8 means minor gaps. Later rounds rate the revised
+plan, scored by reviewers who saw the earlier round, so the rating change is not an independent quality measure.
 
 Read the [field report](docs/field-report.md) for the frozen inventory cutoff, coverage, timing, and limitations.
 The [aggregate JSON](docs/field-report.json) contains no private source records.
