@@ -27,6 +27,7 @@
       "attemptStatuses": {"running": 1, "completed": 147, "failed": 33, "missing": 0, "other": 0},
       "findings": {"occurrences": 508, "adjudicated": 490, "confirm": 365, "modify": 96, "discard": 29, "acceptedBlocking": 48, "recordedFixed": 0, "recordedFixedBlocking": 0, "agreedDiscarded": 0, "unadjudicated": 18, "unmatchedVerdicts": 0},
       "runsContaining": {"withRounds": 92, "withAttempts": 92, "withFailures": 18, "withVerdicts": 81, "withFindings": 83, "withAdjudicatedFindings": 81, "withConfirm": 78, "withModify": 50, "withDiscard": 18, "withAgreedDiscarded": 0, "withUnadjudicated": 2, "withUnmatchedVerdicts": 0, "withAcceptedFindings": 80, "withAcceptedBlocking": 32, "withRecordedFixes": 0, "withRecordedBlockingFixes": 0},
+      "ratings": {"multiRoundRuns": 52, "first": {"eligible": 52, "recorded": 52, "missing": 0, "total": 341, "median": 6}, "last": {"eligible": 52, "recorded": 52, "missing": 0, "total": 425, "median": 8}, "improved": 42, "unchanged": 10, "declined": 0, "firstAtLeast8": 13, "lastAtLeast8": 50},
       "recordedAttemptSeconds": {"eligible": 181, "recorded": 178, "missing": 3, "total": 73635, "median": 313.5},
       "wallElapsedSeconds": {"eligible": 92, "recorded": 85, "missing": 7, "total": 234328.98599999998, "median": 909.408},
       "providerReported": {
@@ -53,6 +54,7 @@
       "attemptStatuses": {"running": 1, "completed": 158, "failed": 20, "missing": 0, "other": 0},
       "findings": {"occurrences": 112, "adjudicated": 112, "confirm": 92, "modify": 2, "discard": 18, "acceptedBlocking": 40, "recordedFixed": 55, "recordedFixedBlocking": 31, "agreedDiscarded": 17, "unadjudicated": 0, "unmatchedVerdicts": 0},
       "runsContaining": {"withRounds": 139, "withAttempts": 139, "withFailures": 14, "withVerdicts": 135, "withFindings": 53, "withAdjudicatedFindings": 53, "withConfirm": 42, "withModify": 2, "withDiscard": 11, "withAgreedDiscarded": 10, "withUnadjudicated": 0, "withUnmatchedVerdicts": 0, "withAcceptedFindings": 43, "withAcceptedBlocking": 14, "withRecordedFixes": 18, "withRecordedBlockingFixes": 11},
+      "ratings": {"multiRoundRuns": 0, "first": {"eligible": 0, "recorded": 0, "missing": 0, "total": null, "median": null}, "last": {"eligible": 0, "recorded": 0, "missing": 0, "total": null, "median": null}, "improved": 0, "unchanged": 0, "declined": 0, "firstAtLeast8": 0, "lastAtLeast8": 0},
       "recordedAttemptSeconds": {"eligible": 179, "recorded": 177, "missing": 2, "total": 57727, "median": 232},
       "wallElapsedSeconds": {"eligible": 144, "recorded": 143, "missing": 1, "total": 191441.413, "median": 302.911},
       "providerReported": {

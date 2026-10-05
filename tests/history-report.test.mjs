@@ -4,7 +4,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
-import { readHistory, aggregateHistory } from '../scripts/history-report.mjs';
+import { readHistory, aggregateHistory, renderMarkdown } from '../scripts/history-report.mjs';
 import { computeStats, statsRowFromRun } from '../skills/cross-debate/scripts/lib/common.mjs';
 
 const finding = (id = 'F1') => ({ id, severity: 'blocking', status: 'agreed', claim: 'PRIVATE_SENTINEL' });
@@ -76,6 +76,20 @@ test('inventory excludes audits, backend copies, clones, deeper decoys, and all 
   assert.equal(history.coverage.malformedRecords, 2);
   assert.equal(history.coverage.unsupportedRecords, 1);
   assert.equal(history.coverage.symlinksSkipped, 2);
+});
+
+test('plan ratings compare first and last rated rounds and render as rates', t => {
+  const { options, raw } = fixture(t);
+  const rated = (runId, ...ratings) => raw(options.home, run(runId, { kind: 'plan', outcome: 'completed',
+    rounds: ratings.map((rating, i) => ({ ...round(i + 1), review: { rating, findings: [finding()] } })) }));
+  rated('up', 6, 9); rated('flat', 8, 7, 8); rated('down', 9, 7); rated('single', 5);
+  const report = aggregateHistory(readHistory(options)), { ratings } = report.workflows.plan;
+  assert.deepEqual({ ...ratings, first: ratings.first.median, last: ratings.last.median },
+    { multiRoundRuns: 3, first: 8, last: 8, improved: 1, unchanged: 1, declined: 1, firstAtLeast8: 2, lastAtLeast8: 2 });
+  const markdown = renderMarkdown(report);
+  assert.match(markdown, /\| Multi-round runs whose rating improved \/ unchanged \/ declined \| 33% \/ 33% \/ 33% of 3 \| n\/a \|/);
+  assert.match(markdown, /\| Adjudicated findings accepted \(confirm or modify\) \| 8 of 8 \(100%\) \| 0 of 0 \(n\/a\) \|/);
+  assert.match(markdown, /\| Accepted findings marked fixed \| not recorded \| 0 of 0 \(n\/a\) \|/);
 });
 
 test('occurrences join same-round verdicts and separate outcomes and partial measurement coverage', t => {

@@ -165,11 +165,17 @@ function workflowAggregate(runs) {
     }
     for (const key of seen) events[key]++;
   }
+  // A later round rates the revised plan, so first-to-last change reflects revisions after review.
+  const rated = runs.map(r => r.rounds.map(x => x.review?.rating).filter(number)).filter(r => r.length > 1);
+  const ratings = { multiRoundRuns: rated.length, first: measure(rated.map(r => r[0])), last: measure(rated.map(r => r.at(-1))),
+    improved: rated.filter(r => r.at(-1) > r[0]).length, unchanged: rated.filter(r => r.at(-1) === r[0]).length,
+    declined: rated.filter(r => r.at(-1) < r[0]).length,
+    firstAtLeast8: rated.filter(r => r[0] >= 8).length, lastAtLeast8: rated.filter(r => r.at(-1) >= 8).length };
   return { runs: runs.length, statuses: distribution(runs.map(r => r.status), statuses), outcomes: distribution(runs.map(r => r.outcome), outcomes),
     reviewStates: distribution(runs.map(reviewState), ['failed', 'waived', 'unfinished', 'changedAfterReview', 'blocked', 'finishedWithVerdict', 'finishedWithoutVerdict']),
     rounds: measure(runs.map(r => r.rounds.length)), attempts: attempts.length, failedAttempts: attempts.filter(a => a.status === 'failed').length,
     attemptStatuses: distribution(attempts.map(a => a.status), ['running', 'completed', 'failed']),
-    findings, runsContaining: events, recordedAttemptSeconds: measure(attempts.map(a => a.seconds)), wallElapsedSeconds: measure(runs.map(elapsed)),
+    findings, runsContaining: events, ratings, recordedAttemptSeconds: measure(attempts.map(a => a.seconds)), wallElapsedSeconds: measure(runs.map(elapsed)),
     providerReported: { agentRecords: agents.length, inputTokens: measure(agents.map(a => a.usage?.input)), outputTokens: measure(agents.map(a => a.usage?.output)),
       cacheReadTokens: measure(agents.map(a => a.usage?.cacheRead)), cacheWriteTokens: measure(agents.map(a => a.usage?.cacheWrite)), costUsd: measure(agents.map(a => a.cost)) },
     orchestratorNonAdditive: { inputTokens: measure(runs.map(r => r.orchestratorUsage?.input)), outputTokens: measure(runs.map(r => r.orchestratorUsage?.output)) } };
@@ -209,6 +215,8 @@ Use frozen inputs to reproduce a snapshot. Output contains aggregate metadata on
 `;
 const display = value => value === null ? 'unreported' : String(Math.round(value * 10000) / 10000);
 const counts = values => Object.entries(values).filter(([, value]) => value).map(([key, value]) => `${key}: ${value}`).join('; ') || 'none';
+const pct = (n, d) => d ? `${Math.round(n / d * 100)}%` : 'n/a';
+const share = (n, d) => `${n} of ${d} (${pct(n, d)})`;
 const table = (headings, rows) => [headings, headings.map(() => '---'), ...rows].map(row => `| ${row.join(' | ')} |`).join('\n');
 export function renderMarkdown(report) {
   const cohorts = Object.entries(report.workflows), c = report.coverage, s = report.standalone;
@@ -227,6 +235,24 @@ export function renderMarkdown(report) {
     ['Unadjudicated findings / unmatched verdicts', r => `${r.findings.unadjudicated} / ${r.findings.unmatchedVerdicts}`],
     ['Runs with unadjudicated findings / unmatched verdicts', r => `${r.runsContaining.withUnadjudicated} / ${r.runsContaining.withUnmatchedVerdicts}`],
   ];
+  const accepted = r => r.findings.confirm + r.findings.modify;
+  const passed = r => r.outcomes.passed + r.outcomes.completed;
+  const fixes = (r, cell) => r === report.workflows.plan ? 'not recorded' : cell;
+  const gains = [
+    ['Passed or completed outcome', r => share(passed(r), r.runs)],
+    ['Runs with verdicts that accepted findings', r => share(r.runsContaining.withAcceptedFindings, r.runsContaining.withVerdicts)],
+    ['Runs with verdicts that accepted blocking findings', r => share(r.runsContaining.withAcceptedBlocking, r.runsContaining.withVerdicts)],
+    ['Runs with verdicts that fixed blocking findings', r => fixes(r, share(r.runsContaining.withRecordedBlockingFixes, r.runsContaining.withVerdicts))],
+    ['Adjudicated findings accepted (confirm or modify)', r => share(accepted(r), r.findings.adjudicated)],
+    ['Adjudicated findings discarded', r => share(r.findings.discard, r.findings.adjudicated)],
+    ['Accepted findings marked fixed', r => fixes(r, share(r.findings.recordedFixed, accepted(r)))],
+    ['Accepted blocking findings marked fixed', r => fixes(r, share(r.findings.recordedFixedBlocking, r.findings.acceptedBlocking))],
+    ['Reviewer rating, first → last round (median)', r => r.ratings.multiRoundRuns ? `${display(r.ratings.first.median)} → ${display(r.ratings.last.median)}` : 'n/a'],
+    ['Multi-round runs whose rating improved / unchanged / declined', r => r.ratings.multiRoundRuns
+      ? [r.ratings.improved, r.ratings.unchanged, r.ratings.declined].map(n => pct(n, r.ratings.multiRoundRuns)).join(' / ') + ` of ${r.ratings.multiRoundRuns}` : 'n/a'],
+    ['Multi-round runs rated 8+, first → last round', r => r.ratings.multiRoundRuns
+      ? `${pct(r.ratings.firstAtLeast8, r.ratings.multiRoundRuns)} → ${pct(r.ratings.lastAtLeast8, r.ratings.multiRoundRuns)} of ${r.ratings.multiRoundRuns}` : 'n/a'],
+  ];
   const timing = cohorts.flatMap(([name, r]) => [[`${name}: recorded attempt seconds`, r.recordedAttemptSeconds], [`${name}: wall elapsed seconds`, r.wallElapsedSeconds]]);
   timing.push(['standalone: recorded stage seconds', s.recordedStageSeconds], ['standalone: wall elapsed seconds', s.wallElapsedSeconds]);
   const measurement = rows => table(['Measurement', 'Recorded / eligible', 'Missing', 'Total', 'Median'],
@@ -243,6 +269,9 @@ export function renderMarkdown(report) {
     `Stats-only coverage: ${report.statsOnly.runs} runs (${counts(report.statsOnly.kinds)}). These lack raw finding joins and are excluded from the workflow tables.`,
     '## Workflow occurrences',
     table(['Metric', 'Plan', 'Code'], metrics.map(([name, get]) => [name, ...cohorts.map(([, r]) => get(r))])),
+    '## Rates and measured changes',
+    table(['Measure', 'Plan', 'Code'], gains.map(([name, get]) => [name, ...cohorts.map(([, r]) => get(r))])),
+    'Rates use the counts above; denominators are shown in each cell. Ratings are the reviewers\' combined score (the lower of the two) for the plan text each round reviewed. A later round reviews the revised plan, so a rise reflects revisions made after review, scored by reviewers who saw the earlier round; it is not an independent quality measure. Runs with fewer than two rated rounds are excluded from rating rows. Plan change prose is not a recorded fix, so plan fix rates are not recorded.',
     ...cohorts.map(([name, r]) => `${name}: recorded statuses: ${counts(r.statuses)}. Recorded outcomes: ${counts(r.outcomes)}.\n\n${name}: review states: ${counts(r.reviewStates)}. Attempt states: ${counts(r.attemptStatuses)}.`),
     'Each occurrence is identified by (runId, round, findingId) internally. Verdicts join only to findings in the same round. Confirm/modify counts as accepted; blocking uses that finding\'s recorded severity. Fixes require an accepted verdict with fixed=true. Plan change prose is not a recorded fix. Occurrences can repeat a bug across rounds; these are not unique bugs or semantic deduplication.',
     'A finished/completed label alone does not establish successful review. Failed, waived, unfinished, blocked, and changed-after-review records remain separate. Finished-with-verdict is a coverage category, not a quality judgment.',
