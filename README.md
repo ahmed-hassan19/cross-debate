@@ -5,18 +5,17 @@
 
 # Cross Debate
 
+> ### Raise your agent's median plan rating from 6 to 8 out of 10 (+33%)
+> ### Take plans clearing the 8+ bar from 25% to 96%
+> ### Fix 78% of confirmed blocking bugs before the agent says it's done
+>
+> <sub>Measured on one maintainer's recorded runs; see [Recorded outcomes](#recorded-outcomes) for denominators and caveats.</sub>
+
 [![CI](https://github.com/ahmed-hassan19/cross-debate/actions/workflows/test.yml/badge.svg)](https://github.com/ahmed-hassan19/cross-debate/actions/workflows/test.yml)
 [![MIT license](https://img.shields.io/badge/license-MIT-52615d)](LICENSE)
 [![Node 22+ installer](https://img.shields.io/badge/installer-Node_22%2B-327b73)](docs/setup.md)
 
 Cross-agent review for plans, code, and pull requests.
-
-- **Better plans before you build:** the median plan rating rose from 6 to 8 out of 10 (+33%), and plans
-  meeting the 8+ bar went from 25% to 96%.
-- **Blocking bugs stopped before they land:** reviewers raised 40 blocking code findings the agent confirmed as real,
-  and 78% were fixed before the work was reported done.
-
-<sub>From one maintainer's recorded runs; see [Recorded outcomes](#recorded-outcomes) for denominators and caveats.</sub>
 
 Your coding agent coordinates two reviewers, verifies findings in plan and code workflows, and asks before pushing.
 
