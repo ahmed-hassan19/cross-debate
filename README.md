@@ -37,7 +37,9 @@ The installer asks for two reviewers. The **Lead reviewer** reviews code and pul
 final call on which findings are real; on plans it gives the second independent opinion. Best fit: your most
 capable, deep-thinking model with high effort. The **Challenger** questions the Lead's findings and adds missed
 problems; on plans it gives the first independent opinion. Best fit: a capable model from a different family than
-the Lead, such as Codex when the Lead is Claude; very small models tend to just agree. Model menus start with **CLI default**,
+the Lead, such as Codex when the Lead is Claude; very small models tend to just agree. When you choose reviewers yourself,
+you pick them for plans first, then either reuse them for code reviews or choose code reviewers separately, for example
+lighter models or lower effort. Model menus start with **CLI default**,
 show the newest model of each family plus your existing choice, and end with **Enter another model**.
 OpenCode uses `provider/model`. Claude Code lists your account's models through its
 [initialize control request](https://code.claude.com/docs/en/agent-sdk/typescript) in safe mode; Codex uses its

@@ -6,7 +6,8 @@ preserving unrelated lanes. Settings live in `~/.config/delegate-skills/config.j
 A lane names a role; its `implementer` selects the reviewer CLI. Your seat is your host agent.
 
 The installer calls the two reviewers the **Lead reviewer** (`review-main` and `plan-debate`) and the
-**Challenger** (`review-debate` and `plan-main`).
+**Challenger** (`review-debate` and `plan-main`). When you choose reviewers yourself, it asks for the plan lanes first,
+then lets you reuse them for the code lanes or choose the code lanes separately.
 
 | Lane | Installer role | Role |
 |---|---|---|

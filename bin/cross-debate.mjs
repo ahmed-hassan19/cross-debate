@@ -267,27 +267,29 @@ export async function install(ui = p, cwd = process.cwd()) {
       message: 'Who should review your work?',
       options: [
         { value: 'default', label: defaultLabel(complete, available), hint: 'recommended' },
-        { value: 'custom', label: 'Choose two reviewers and their models' },
+        { value: 'custom', label: 'Choose reviewers and models for plans and code' },
       ],
     });
-    const pair = [];
-    if (!complete || choice === 'custom') {
+    const choosePair = async (stage, initial = []) => {
+      const pair = [];
       for (const [i, role] of roles.entries()) {
+        const name = choice === 'custom' ? `${stage === 'plan' ? 'Plan' : 'Code'} review · ${role.name}` : role.name;
         const implementer = choice === 'custom' ? await ask('select', {
-          message: `${role.name}: which CLI? ${role.cli}`, options: available.map(value => ({ value, label: labels[value] })), initialValue: available[i % available.length],
+          message: `${name}: which CLI? ${role.cli}`, options: available.map(value => ({ value, label: labels[value] })),
+          initialValue: initial[i]?.implementer ?? available[i % available.length],
         }) : available[i % Math.min(2, available.length)];
         let model = 'default';
         if (implementer === 'opencode') model = await ask('text', {
-          message: `${role.name} model: OpenCode provider/model`,
+          message: `${name} model: OpenCode provider/model`,
           validate: value => !/^[^/\s]+\/\S+$/.test(value || '')
             ? 'Enter the provider/model ID from your OpenCode configuration'
             : laneError(buildLane({ implementer, model: value })),
         });
         else if (choice === 'custom') {
-          const existing = current.lanes[role.code];
+          const existing = current.lanes[stage === 'plan' ? role.plan : role.code];
           const catalog = await discoverModelCatalog(implementer);
           const selection = await ask('select', {
-            message: `${role.name} model`,
+            message: `${name} model`,
             options: modelMenu(implementer, catalog, existing?.implementer === implementer ? existing.model : null),
             initialValue: 'default',
           });
@@ -298,14 +300,26 @@ export async function install(ui = p, cwd = process.cwd()) {
         }
         const dial = implementer === 'opencode' ? 'variant' : 'effort';
         const value = choice === 'custom' ? await ask('text', {
-          message: dialMessage(role, implementer), defaultValue: 'none',
+          message: dialMessage({ ...role, name }, implementer), defaultValue: 'none',
           validate: value => laneError(buildLane({ implementer, model: model || 'default', dial, value: value || 'none' })),
         }) : 'none';
         pair.push(buildLane({ implementer, model: model || 'default', dial, value: value || 'none' }));
       }
+      return pair;
+    };
+    let pair = [], codePair = [];
+    if (!complete || choice === 'custom') {
+      pair = await choosePair('plan');
+      codePair = choice === 'custom' && await ask('select', {
+        message: 'Code reviews: use the same reviewers as plans?',
+        options: [
+          { value: 'same', label: 'Yes, same CLIs, models, and effort' },
+          { value: 'separate', label: 'No, choose code reviewers separately', hint: 'for example, lighter models or lower effort' },
+        ],
+      }) === 'separate' ? await choosePair('code', pair) : pair;
     }
     const config = structuredClone(current);
-    const proposed = { 'plan-main': pair[1], 'plan-debate': pair[0], 'review-main': pair[0], 'review-debate': pair[1] };
+    const proposed = { 'plan-main': pair[1], 'plan-debate': pair[0], 'review-main': codePair[0], 'review-debate': codePair[1] };
     for (const name of requiredLanes) if (choice === 'custom' || !config.lanes[name]) config.lanes[name] = proposed[name];
     if (choice === 'custom') for (const name of Object.keys(config.lanes).filter(n => n.startsWith('plan-main-'))) config.lanes[name] = pair[1];
     const describe = lane => [lane.implementer, lane.model || 'CLI default model', lane.effort || lane.variant].filter(Boolean).join(' / ') + (lane.source === 'project' ? ' (project override)' : '');
