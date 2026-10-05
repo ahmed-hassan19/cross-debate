@@ -248,7 +248,7 @@ for (const [name, setup, expected] of [
 test('custom prompts name each role, give tier advice, and recommend no OpenCode variant level', async () => {
   write(path.join(home, 'bin/opencode'), '#!/bin/sh\nprintf called > "$HOME/cli-called"\nexit 99\n');
   fs.chmodSync(path.join(home, 'bin/opencode'), 0o755);
-  const selections = ['custom', 'claude', 'default', 'opencode'];
+  const selections = ['custom', 'claude', 'default', 'opencode', 'same'];
   const answers = ['high', 'provider/model', ''];
   const selects = [], texts = [];
   const ui = { intro() {}, note() {}, outro() {}, log: { info() {} }, isCancel: () => false,
@@ -257,20 +257,22 @@ test('custom prompts name each role, give tier advice, and recommend no OpenCode
     text: async options => { texts.push(options.message); const value = answers.shift(); assert.equal(options.validate(value), undefined); return value; } };
   assert.equal(await install(ui, home), 0);
   assert.deepEqual(selects.slice(1), [
-    'Lead reviewer: which CLI? Your most capable, deep-thinking model works best here.',
-    'Lead reviewer model',
-    'Challenger: which CLI? A different model family from the Lead works best here.',
+    'Plan review · Lead reviewer: which CLI? Your most capable, deep-thinking model works best here.',
+    'Plan review · Lead reviewer model',
+    'Plan review · Challenger: which CLI? A different model family from the Lead works best here.',
+    'Code reviews: use the same reviewers as plans?',
   ]);
   assert.deepEqual(texts, [
-    'Lead reviewer effort: low, medium, high, xhigh, max, or ultracode (high recommended; Enter for the CLI default)',
-    'Challenger model: OpenCode provider/model',
-    'Challenger variant: a provider-specific name from your OpenCode config (Enter for the default)',
+    'Plan review · Lead reviewer effort: low, medium, high, xhigh, max, or ultracode (high recommended; Enter for the CLI default)',
+    'Plan review · Challenger model: OpenCode provider/model',
+    'Plan review · Challenger variant: a provider-specific name from your OpenCode config (Enter for the default)',
   ]);
   assert.deepEqual(json(config).lanes['review-debate'], { implementer: 'opencode', model: 'provider/model' });
+  assert.deepEqual(json(config).lanes['plan-main'], { implementer: 'opencode', model: 'provider/model' });
 });
 
 test('custom reviewers validate model input and persist models and reasoning effort', async () => {
-  const selections = ['custom', 'codex', 'other', 'claude', 'other'];
+  const selections = ['custom', 'codex', 'other', 'claude', 'other', 'same'];
   const answers = ['example-codex', 'high', 'example-claude', 'medium'];
   const texts = [];
   const ui = { intro() {}, note() {}, outro() {}, log: { info() {} }, isCancel: () => false,
@@ -283,8 +285,25 @@ test('custom reviewers validate model input and persist models and reasoning eff
   assert.equal(await install(ui, home), 0);
   assert.deepEqual(json(config).lanes['review-main'], { implementer: 'codex', model: 'example-codex', effort: 'high' });
   assert.deepEqual(json(config).lanes['plan-main'], { implementer: 'claude', model: 'example-claude', effort: 'medium' });
-  assert.ok(texts.includes('Lead reviewer effort: for example low, medium, high, or xhigh (high recommended; Enter for the CLI default)'));
-  assert.ok(texts.includes('Challenger effort: low, medium, high, xhigh, max, or ultracode (medium or high recommended; Enter for the CLI default)'));
+  assert.ok(texts.includes('Plan review · Lead reviewer effort: for example low, medium, high, or xhigh (high recommended; Enter for the CLI default)'));
+  assert.ok(texts.includes('Plan review · Challenger effort: low, medium, high, xhigh, max, or ultracode (medium or high recommended; Enter for the CLI default)'));
+});
+
+test('custom code reviewers can differ from plan reviewers', async () => {
+  const selections = ['custom', 'codex', 'other', 'claude', 'other', 'separate', 'codex', 'other', 'claude', 'other'];
+  const answers = ['plan-codex', 'high', 'plan-claude', 'high', 'code-codex', 'low', 'code-claude', 'medium'];
+  const initials = [];
+  const ui = { intro() {}, note() {}, outro() {}, log: { info() {} }, isCancel: () => false,
+    multiselect: async () => ['codex'], confirm: async () => true, cancel: message => assert.fail(message),
+    select: async ({ message, initialValue }) => { if (message.startsWith('Code review ·') && message.includes('which CLI')) initials.push(initialValue); return selections.shift(); },
+    text: async () => answers.shift() };
+  assert.equal(await install(ui, home), 0);
+  const { lanes } = json(config);
+  assert.deepEqual(initials, ['codex', 'claude'], 'code CLI prompts default to the plan choices');
+  assert.deepEqual(lanes['plan-debate'], { implementer: 'codex', model: 'plan-codex', effort: 'high' });
+  assert.deepEqual(lanes['plan-main'], { implementer: 'claude', model: 'plan-claude', effort: 'high' });
+  assert.deepEqual(lanes['review-main'], { implementer: 'codex', model: 'code-codex', effort: 'low' });
+  assert.deepEqual(lanes['review-debate'], { implementer: 'claude', model: 'code-claude', effort: 'medium' });
 });
 
 for (const host of ['claude', 'codex', 'cursor', 'opencode']) test(`${host} wizard explains scope and usage before Apply and provides a runnable handoff`, async () => {
