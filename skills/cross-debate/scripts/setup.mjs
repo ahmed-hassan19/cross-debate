@@ -374,7 +374,7 @@ async function doctorCommand(flags) {
     const binding = entry ? `${entry.implementer} ${entry.model || '(CLI default model)'}${entry.effort ? ` effort=${entry.effort}` : ''}${entry.variant ? ` variant=${entry.variant}` : ''} (${entry.source})` : '';
     add(ok ? 'ok' : 'fail', `lane ${lane}`, ok ? binding : [binding, error].filter(Boolean).join(': '));
   }
-  if (checks.some(check => !check.ok)) add('warn', 'repair reviewers', 'run npx --yes github:ahmed-hassan19/cross-debate in your own terminal; inspect project overrides and their trust if reported above');
+  if (checks.some(check => !check.ok)) add('warn', 'repair reviewers', 'run npx --yes cross-debate in your own terminal; inspect project overrides and their trust if reported above');
   for (const line of seatPairs(lanes, seats)) add(line.includes('limited model diversity') ? 'warn' : 'ok', 'plan pairing', line);
   if (lanes['review-main'] && lanes['review-debate'] && lanes['review-main'].implementer === lanes['review-debate'].implementer
     && lanes['review-main'].model === lanes['review-debate'].model) add('warn', 'code pairing', 'supported; identical CLI/model choices limit reviewer diversity');

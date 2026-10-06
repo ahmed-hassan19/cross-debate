@@ -5,13 +5,13 @@ or edit real host settings on your behalf. Start with [the README](../README.md#
 
 ## Update or change a project's review setting
 
-Rerun `npx --yes github:ahmed-hassan19/cross-debate` to update or change reviewers. It preserves unrelated fleet
+Rerun `npx --yes cross-debate` to update or change reviewers. It preserves unrelated fleet
 settings. Use `--version` to see both the installer and installed skill versions.
 
 ```sh
-npx --yes github:ahmed-hassan19/cross-debate scope enable --cwd "/path/to/project"
-npx --yes github:ahmed-hassan19/cross-debate scope status --cwd "/path/to/project"
-npx --yes github:ahmed-hassan19/cross-debate setup doctor --agent codex --cwd "/path/to/project"
+npx --yes cross-debate scope enable --cwd "/path/to/project"
+npx --yes cross-debate scope status --cwd "/path/to/project"
+npx --yes cross-debate setup doctor --agent codex --cwd "/path/to/project"
 ```
 
 Git projects and separate clones receive automatic reviews by default; `scope disable` opts out a repository and its linked worktrees.
@@ -21,7 +21,7 @@ Restart the host, check reviewer sign-in yourself, and exercise a small plan/cod
 For Codex, doctor reports whether Codex trusts each cross-debate hook and prints the required hook feature and writable
 root; it does not parse TOML.
 
-To stop automatic reviews, run `npx --yes github:ahmed-hassan19/cross-debate scope disable --cwd "/path/to/project"`.
+To stop automatic reviews, run `npx --yes cross-debate scope disable --cwd "/path/to/project"`.
 Finish or explicitly waive any active candidate first. For complete removal, follow the authoritative
 [removal steps](../skills/cross-debate/references/operations.md#removal), preserving unrelated settings.
 

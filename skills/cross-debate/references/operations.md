@@ -91,7 +91,7 @@ On Cursor and OpenCode, invoke the plan and code workflows yourself with `--seat
 
 ## Removal
 
-If you need automatic reviews off before removing the hooks, run `npx --yes github:ahmed-hassan19/cross-debate scope disable --cwd "/path/to/project"` for each clone. If a candidate is active, finish it or explicitly waive it before disabling. Linked worktrees share the opt-out.
+If you need automatic reviews off before removing the hooks, run `npx --yes cross-debate scope disable --cwd "/path/to/project"` for each clone. If a candidate is active, finish it or explicitly waive it before disabling. Linked worktrees share the opt-out.
 
 Then close your agent sessions and remove the following entries in your editor. Preserve unrelated settings; do not restore a whole old settings backup over newer edits.
 
