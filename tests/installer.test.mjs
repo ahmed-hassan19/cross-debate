@@ -318,7 +318,7 @@ for (const host of ['claude', 'codex', 'cursor', 'opencode']) test(`${host} wiza
   for (const phrase of ['Lead reviewer', 'Challenger', 'deep thinking']) assert.ok(intro.includes(phrase), phrase);
   assert.doesNotMatch(intro, /Reviewer 1/);
   const next = notes.find(note => note.title === 'Next').text;
-  assert.match(next, /Installed cross-debate 0\.1\.0/);
+  assert.match(next, /Installed cross-debate 0\.2\.0/);
   assert.match(next, /Current directory: Git repository; automatic reviews on/);
   assert.match(next, /First review prompt: Use cross-debate/);
   assert.match(next, /Restart your agent/);
