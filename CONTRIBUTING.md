@@ -20,7 +20,7 @@ node --test tests/package.test.mjs
 It packs the repository, extracts it outside the checkout, installs locked dependencies offline from the
 cache populated by `npm ci`, and runs the wizard with scripted answers. It then removes the extracted npm
 package and checks the installed runtime. This checks packaging and configuration, not model quality or
-interactive host trust.
+Codex hook trust against a real app-server.
 
 Keep each pull request focused. Describe the user-visible change and the checks you ran. Add a regression
 case for behavior changes. Do not include local `AGENTS.md`, `CLAUDE.md`, review transcripts, credentials,
@@ -40,8 +40,8 @@ For a workflow problem, include the failed stage and error class; a full session
    `npm version <version> --no-git-tag-version`. Review the resulting diff and record user-visible changes.
 3. Run `node --test tests/package.test.mjs` on the release candidate. Inspect `npm pack --dry-run` for
    unexpected files and confirm the skill includes both its own license and upstream notices.
-4. In a scratch project, install interactively, restart a supported host, accept hook trust if prompted, and
-   exercise a plan review and local code review. Record host/CLI versions and any unperformed checks.
+4. In a scratch project, install interactively, restart a supported host, confirm Codex shows no `/hooks` trust
+   warning (the installer trusts its own hooks), and exercise a plan review and local code review. Record host/CLI versions and any unperformed checks.
 5. After committing the reviewed release candidate, run `npm whoami`, create the archive with `npm pack`, and
    publish it with `npm publish <archive.tgz> --access public`. npm authentication and any required 2FA belong
    to the maintainer.

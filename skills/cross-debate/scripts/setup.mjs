@@ -12,6 +12,7 @@ import {
 } from './lib/common.mjs';
 import { resolveReviewOverride } from './lib/recovery.mjs';
 import { discoverModelCatalog, modelMenu } from './lib/model-catalog.mjs';
+import { codexHookStatus } from './lib/codex-hooks.mjs';
 
 const HELP = `debate.mjs setup — configure reviewer lanes and host hooks, then check the install
 
@@ -186,7 +187,7 @@ async function lanesCommand(flags) {
 
 // ---------- hooks ----------
 
-const marker = (agent) => `debate.mjs" hook ${agent}`;
+export const marker = (agent) => `debate.mjs" hook ${agent}`;
 function hookCommand(cli, agent, event) { return `node ${JSON.stringify(cli)} hook ${agent} ${event}`; }
 function claudeHome() { return process.env.CLAUDE_CONFIG_DIR || path.join(os.homedir(), '.claude'); }
 function codexHome() { return process.env.CODEX_HOME || path.join(os.homedir(), '.codex'); }
@@ -289,7 +290,7 @@ function hooksCommand(flags, ask = null) {
   if (entries.allow && !flags.write) out.write(`\npermission allowlist (settings.json permissions.allow):\n${entries.allow.map(a => `  ${a}`).join('\n')}\n`);
   if (agent === 'codex') {
     out.write(`\nAdd to ${path.join(codexHome(), 'config.toml')} yourself (setup never edits TOML):\n[features]\nhooks = true\n\n[sandbox_workspace_write]\nwritable_roots = [${JSON.stringify(debateHome())}]\n`);
-    out.write('Codex asks you to trust new or changed hook definitions on the next interactive start; review and accept them there.\n');
+    out.write('Codex skips new or changed hook definitions until you trust them: start Codex, run /hooks and trust them.\n');
   }
   if (flags.write) confirmAndWrite(entries.file, before, after, undefined, ask);
   else out.write('\ndry run: add --write in your own terminal to merge, then restart the agent\n');
@@ -328,6 +329,19 @@ export async function reviewerReadiness(cwd, { globalConfig, seats = AGENTS } = 
     } catch (error) { return { lane, entry, ok: false, error: error.message }; }
   });
   return { ok: checks.every(check => check.ok), lanes: config.lanes, checks };
+}
+
+/** Doctor runs from the shared install, but hooks name the host catalog path, so match the path-independent marker. */
+async function codexTrustRow(file) {
+  const events = Object.keys(hookEntries('codex', invokedCli()).events);
+  const status = await codexHookStatus({ owns: command => command.includes(marker('codex')), events });
+  const what = 'codex hook trust';
+  if (!status) return ['warn', what, 'unverified: Codex app-server unavailable'];
+  if (!status.hooks.length) return ['warn', what, `defined in ${file} but not reported by Codex; check that Codex loads that file (run /hooks), then rerun the installer`];
+  const untrusted = status.hooks.filter(hook => hook.trustStatus !== 'trusted').map(hook => `${hook.key} (${hook.trustStatus})`);
+  if (!untrusted.length && !status.missing.length) return ['ok', what, `${status.hooks.length} hooks trusted`];
+  const problems = [...untrusted, ...status.missing.map(event => `${event} (missing)`)];
+  return ['warn', what, `${problems.join(', ')}; rerun the installer or run /hooks in Codex`];
 }
 
 async function doctorCommand(flags) {
@@ -372,8 +386,10 @@ async function doctorCommand(flags) {
     let present = false;
     // JSON settings escape the quote inside the marker; the OpenCode plugin file stores it raw.
     try { const text = fs.readFileSync(file, 'utf8'); present = text.includes(marker(agent)) || text.includes(JSON.stringify(marker(agent)).slice(1, -1)); } catch { present = false; }
-    add(present ? 'ok' : 'warn', `hooks ${agent}`, present ? `definition marker found in ${file}; execution and native trust unverified` : `not installed (${file}); in your terminal: node ${JSON.stringify(invokedCli())} setup hooks --agent ${agent} --write`);
-    if (agent === 'codex') add('warn', 'Codex manual check', `doctor does not parse config.toml or verify native trust. In ${path.join(codexHome(), 'config.toml')}, ensure features.hooks = true and sandbox_workspace_write.writable_roots includes ${JSON.stringify(debateHome())}, preserving existing roots. Restart Codex and review/trust the hooks when prompted.`);
+    add(present ? 'ok' : 'warn', `hooks ${agent}`, present ? `definition marker found in ${file}; execution unverified` : `not installed (${file}); in your terminal: node ${JSON.stringify(invokedCli())} setup hooks --agent ${agent} --write`);
+    if (agent !== 'codex') continue;
+    if (present) add(...await codexTrustRow(file));
+    add('warn', 'Codex manual check', `doctor does not parse config.toml. In ${path.join(codexHome(), 'config.toml')}, ensure features.hooks = true and sandbox_workspace_write.writable_roots includes ${JSON.stringify(debateHome())}, preserving existing roots. Restart Codex.`);
   }
   const mark = { ok: '✓', warn: '!', fail: '✗' };
   for (const r of rows) process.stdout.write(`${mark[r.level]} ${r.what}: ${r.detail}\n`);

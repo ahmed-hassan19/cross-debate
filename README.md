@@ -38,7 +38,9 @@ Automatic reviews run in every Git project by default and consume reviewer-provi
 to opt out a repository and its linked worktrees. Updating activates existing Git projects unless they already
 have an explicit opt-out.
 The installer preserves unrelated settings and backs up replaced entries.
-Restart your agent. In Codex, review and accept the hook-trust prompt.
+For Codex, the installer also trusts the hooks it just added (only those), so they run without a `/hooks` visit.
+If it cannot, the final note tells you to run `/hooks` in Codex and trust them. Trust is per definition: after a
+hook command changes, rerun the installer. Restart your agent.
 
 The installer asks for two reviewers. The **Lead reviewer** reviews code and pull requests first and makes the
 final call on which findings are real; on plans it gives the second independent opinion. Best fit: your most
@@ -61,8 +63,8 @@ Run from your project, replacing `codex` with `claude`, `cursor`, or `opencode` 
 npx --yes github:ahmed-hassan19/cross-debate setup doctor --agent codex
 ```
 
-Expect reviewer bindings, Git default or explicit opt-out status, and installed hook definitions. Sign-in, native hook trust,
-and interactive execution remain manual checks. [Repair setup](docs/setup.md#troubleshooting) if a check fails.
+Expect reviewer bindings, Git default or explicit opt-out status, and installed hook definitions, plus Codex hook trust. Sign-in and
+interactive execution remain manual checks. [Repair setup](docs/setup.md#troubleshooting) if a check fails.
 
 ## Your first review
 

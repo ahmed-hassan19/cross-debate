@@ -27,41 +27,51 @@ export function modelMenu(cli, catalog, existing = null) {
   return options;
 }
 
-/** Speak JSON lines with a CLI until `onMessage` returns model IDs; fall back on any failure or timeout. */
-function askCli(cli, args, first, onMessage, { spawnImpl = spawn, timeout = TIMEOUT_MS } = {}) {
+/**
+ * Speak JSON lines with a CLI until `onMessage` returns a non-null result. Resolves `failure` on spawn errors, exit,
+ * timeout, or when `onMessage` throws.
+ */
+export function askCli(cli, args, first, onMessage, failure, { spawnImpl = spawn, timeout = TIMEOUT_MS } = {}) {
   return new Promise(resolve => {
     let child;
     try { child = spawnImpl(cli, args, { stdio: ['pipe', 'pipe', 'ignore'] }); }
-    catch { resolve(fallback[cli]); return; }
+    catch { resolve(failure); return; }
     let done = false;
     let buffer = '';
-    const finish = ids => {
+    const finish = result => {
       if (done) return;
       done = true;
       clearTimeout(timer);
       child.kill();
-      resolve(ids?.length ? ids : fallback[cli]);
+      resolve(result ?? failure);
     };
     const send = value => { try { child.stdin.write(`${JSON.stringify(value)}\n`); } catch { finish(); } };
     const timer = setTimeout(() => finish(), timeout);
     child.on('error', () => finish());
     child.on('exit', () => finish());
     child.stdin.on?.('error', () => finish());
+    child.stdout.setEncoding('utf8'); // decodes multibyte characters split across chunks
     child.stdout.on('data', chunk => {
-      buffer += chunk.toString();
+      buffer += chunk;
       if (buffer.length > 1_000_000) return finish();
-      while (buffer.includes('\n')) {
+      while (!done && buffer.includes('\n')) {
         const end = buffer.indexOf('\n');
         const line = buffer.slice(0, end); buffer = buffer.slice(end + 1);
         let message;
         try { message = JSON.parse(line); } catch { continue; }
-        const ids = onMessage(message, send);
-        if (ids) finish(ids.filter(id => typeof id === 'string'));
+        let result;
+        try { result = onMessage(message, send); } catch { return finish(); }
+        if (result != null) finish(result);
       }
     });
     send(first);
   });
 }
+
+const catalog = cli => ids => {
+  const usable = ids.filter(id => typeof id === 'string');
+  return usable.length ? usable : fallback[cli];
+};
 
 /**
  * The Agent SDK's initialize control request: Claude Code answers with the signed-in account's models
@@ -75,7 +85,7 @@ export function claudeModels(options) {
       const models = message.response.response?.models;
       // The menu offers CLI default itself; the Default row may resolve to an older model that would hide a newer one.
       return Array.isArray(models) ? models.filter(model => model.value !== 'default').map(model => model.resolvedModel ?? model.value) : [];
-    }, options);
+    }, [], options).then(catalog('claude'));
 }
 
 export function codexModels(options) {
@@ -89,7 +99,7 @@ export function codexModels(options) {
       if (message.id !== 2) return null;
       const entries = message.result?.data ?? message.result?.models ?? [];
       return Array.isArray(entries) ? entries.map(entry => entry.model ?? entry.id ?? entry.slug) : [];
-    }, options);
+    }, [], options).then(catalog('codex'));
 }
 
 export async function discoverModelCatalog(cli) {

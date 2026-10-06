@@ -322,7 +322,7 @@ for (const host of ['claude', 'codex', 'cursor', 'opencode']) test(`${host} wiza
   assert.match(next, /Current directory: Git repository; automatic reviews on/);
   assert.match(next, /First review prompt: Use cross-debate/);
   assert.match(next, /Restart your agent/);
-  if (host === 'codex') assert.match(next, /trust the new hooks/);
+  if (host === 'codex') assert.match(next, /In Codex, run \/hooks and trust the cross-debate hooks/, 'the stub codex has no app-server, so trust falls back');
   if (host === 'cursor' || host === 'opencode') assert.match(next, /request reviews explicitly; experimental hooks gate Git only/);
   const hostHome = host === 'opencode' ? path.join(home, '.config/opencode') : path.join(home, `.${host}`);
   const installed = path.join(hostHome, 'skills/cross-debate/scripts/debate.mjs');
@@ -330,6 +330,21 @@ for (const host of ['claude', 'codex', 'cursor', 'opencode']) test(`${host} wiza
   const result = spawnSync(process.execPath, [installed, 'setup', 'doctor', '--agent', host, '--cwd', home], { encoding: 'utf8' });
   assert.equal(result.status, 0, result.stderr);
   assert.match(result.stdout, new RegExp(`✓ hooks ${host}: definition marker found`));
+  if (host === 'codex') assert.match(result.stdout, /! codex hook trust: unverified: Codex app-server unavailable/);
+});
+
+test('fresh-home Codex install copies config.toml into a new backup root before trusting hooks', async () => {
+  const notes = {}, infos = [];
+  const ui = { intro() {}, outro() {}, log: { info: message => infos.push(message) }, isCancel: () => false,
+    note: (text, title) => { notes[title] = text; }, multiselect: async () => ['codex'], select: async () => 'default',
+    confirm: async () => true, cancel: message => assert.fail(message) };
+  assert.equal(await install(ui, home), 0);
+  assert.match(notes['Ready to install'], /Codex: trust the cross-debate hooks added here \(only those\)/);
+  assert.ok(infos.includes('Trusting Codex hooks…'));
+  const root = infos.find(message => message.startsWith('Backups: ')).slice('Backups: '.length);
+  const backup = path.join(root, 'config.toml.pre-trust');
+  assert.equal(read(backup), read(toml));
+  assert.deepEqual(json(path.join(root, 'manifest.json')), [{ file: toml, backup }]);
 });
 
 test('handoff reports disabled automation and safely quotes a shell-sensitive project path', async () => {

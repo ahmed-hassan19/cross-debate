@@ -12,6 +12,7 @@ import { SKILL_DIR, debateHome, repositoryScope, writeAtomic, skillVersion, shel
 import { globalConfigPath, parseConfigDocument } from '../skills/cross-debate/vendor/delegate-skills/delegate-setup/scripts/config.mjs';
 import { CLAUDE_EFFORT } from '../skills/cross-debate/vendor/delegate-skills/delegate-setup/scripts/implementers.mjs';
 import { discoverModelCatalog, modelMenu } from '../skills/cross-debate/scripts/lib/model-catalog.mjs';
+import { trustCodexHooks } from '../skills/cross-debate/scripts/lib/codex-hooks.mjs';
 
 const labels = { claude: 'Claude Code', codex: 'Codex', cursor: 'Cursor (experimental)', opencode: 'OpenCode (experimental)' };
 const reviewerCLIs = ['claude', 'codex', 'opencode'];
@@ -142,6 +143,7 @@ export function prepareInstall({ hosts, config, configBefore, cwd = process.cwd(
   const target = installDir();
   const homes = hostHomes();
   const changes = [];
+  let codexCommands = null;
   const add = (file, kind, value) => {
     if (changes.some(change => slot(change.file) === slot(file))) return;
     const previous = stat(file);
@@ -172,6 +174,7 @@ export function prepareInstall({ hosts, config, configBefore, cwd = process.cwd(
       add(entries.file, 'text', json(mergeHooks(host, doc, entries)));
     }
     if (host === 'codex') {
+      codexCommands = Object.values(entries.events).flat().map(entry => entry.command);
       const file = path.join(homes.codex, 'config.toml');
       add(file, 'text', mergeCodex(read(file), debateHome()));
     }
@@ -188,7 +191,7 @@ export function prepareInstall({ hosts, config, configBefore, cwd = process.cwd(
     if (retainedHosts.length && slot(legacy) === slot(sharedLegacy)) continue;
     if (stat(legacy) && ownedSkill(legacy)) add(legacy, 'compat', target);
   }
-  return { changes, cwd, target, retainedHosts };
+  return { changes, cwd, target, retainedHosts, codexCommands };
 }
 
 /** Back up entries themselves (never symlink referents); restore files if applying fails. */
@@ -238,6 +241,19 @@ export function applyInstall(plan) {
     return backupRoot;
   }
   return null;
+}
+
+/** Codex writes trust outside applyInstall's backup window, so copy config.toml into the backup root first. */
+export function backupCodexConfig(backupRoot) {
+  const file = path.join(hostHomes().codex, 'config.toml');
+  if (!stat(file)) return backupRoot;
+  const root = backupRoot ?? path.join(debateHome(), 'install-backups', randomUUID());
+  fs.mkdirSync(root, { recursive: true, mode: 0o700 });
+  const backup = path.join(root, 'config.toml.pre-trust');
+  fs.copyFileSync(file, backup);
+  const manifest = path.join(root, 'manifest.json');
+  writeAtomic(manifest, json([...(stat(manifest) ? JSON.parse(read(manifest)) : []), { file, backup }]));
+  return root;
 }
 
 export async function install(ui = p, cwd = process.cwd()) {
@@ -350,10 +366,20 @@ export async function install(ui = p, cwd = process.cwd()) {
       'Updating activates existing Git projects unless they already have an explicit opt-out.',
       'You can turn reviews off for any project after installing.',
       '', 'Files to install or update:', ...plan.changes.map(change => compact(change.file)),
+      ...(plan.codexCommands ? ['', 'Codex: trust the cross-debate hooks added here (only those).'] : []),
       '', 'Existing entries are backed up. Reviewer sign-in is not checked.',
     ].join('\n'), 'Ready to install');
     if (!await ask('confirm', { message: 'Apply these changes?', initialValue: true })) throw new Error('cancelled');
-    const backup = applyInstall(plan);
+    let backup = applyInstall(plan);
+    let trusted = false;
+    if (plan.codexCommands) {
+      // Files are already applied; a failed trust step only falls back to /hooks.
+      try {
+        backup = backupCodexConfig(backup);
+        ui.log.info('Trusting Codex hooks…');
+        trusted = (await trustCodexHooks({ commands: plan.codexCommands }))?.ok === true;
+      } catch (error) { ui.log.warn(`Could not trust Codex hooks: ${error.message}`); }
+    }
     if (backup) ui.log.info(`Backups: ${backup}`);
     const automaticHosts = hosts.filter(host => host === 'claude' || host === 'codex');
     const effective = repositoryScope(cwd).effective;
@@ -369,7 +395,7 @@ export async function install(ui = p, cwd = process.cwd()) {
       `Installed cross-debate ${version} for ${hosts.map(host => labels[host]).join(', ')}.`,
       `Current directory: ${scope.identity ? `Git repository; automatic reviews ${effective ? 'on' : 'off'}` : 'not a Git repository; no automatic reviews'}.`,
       'Restart your agent to load cross-debate.',
-      ...(hosts.includes('codex') ? ['In Codex, review and trust the new hooks when prompted.'] : []),
+      ...(hosts.includes('codex') ? [trusted ? 'Codex hooks trusted.' : 'In Codex, run /hooks and trust the cross-debate hooks.'] : []),
       'Verify from your project directory:',
       ...hosts.map(host => `node ${shellQuote(path.join(homes[host], 'skills', 'cross-debate', 'scripts', 'debate.mjs'))} setup doctor --agent ${host} --cwd ${shellQuote(cwd)}`),
       ...(effective && automaticHosts.length ? [`In ${automaticHosts.map(host => labels[host]).join(' and ')}, enter plan mode and describe your task. Plan and code reviews run automatically.`] : []),
