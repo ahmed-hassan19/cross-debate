@@ -6,7 +6,7 @@ import path from 'node:path';
 import { createHash } from 'node:crypto';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
-import { reviewerReadiness } from '../skills/cross-debate/scripts/setup.mjs';
+import { reviewerReadiness, hookEntries, mergeHooks } from '../skills/cross-debate/scripts/setup.mjs';
 
 const originalEnv = { ...process.env };
 const git = spawnSync('which', ['git'], { encoding: 'utf8' }).stdout.trim();
@@ -114,7 +114,8 @@ test('doctor reports Git default and Codex manual settings without parsing TOML'
   let result = doctor('--agent', 'codex');
   assert.equal(result.status, 0, result.stderr);
   assert.match(result.stdout, /automatic reviews: on: Git default/);
-  assert.match(result.stdout, /does not parse config.toml or verify native trust/);
+  assert.match(result.stdout, /does not parse config.toml\. /);
+  assert.doesNotMatch(result.stdout, /native trust/);
   assert.match(result.stdout, /features.hooks = true.*sandbox_workspace_write.writable_roots/);
   assert.ok(result.stdout.includes(process.env.DEBATE_HOME));
   assert.equal(spawnSync(git, ['-C', repo, 'config', '--local', 'debate.enabled', 'true']).status, 0);
@@ -124,4 +125,36 @@ test('doctor reports Git default and Codex manual settings without parsing TOML'
   assert.match(doctor('--agent', 'codex').stdout, /automatic reviews: off: explicit project opt-out/);
   result = doctor('--agent', 'codex', '--cwd', home);
   assert.match(result.stdout, /automatic reviews: off: not a Git repository/);
+});
+
+test('doctor run from the shared install finds Codex hooks written for the catalog path and reports an untrusted one', () => {
+  const codexHome = path.join(home, '.codex');
+  process.env.CODEX_HOME = codexHome;
+  write(globalFile, JSON.stringify(fleet('codex')));
+  const entries = hookEntries('codex', path.join(codexHome, 'skills/cross-debate/scripts/debate.mjs'));
+  write(entries.file, JSON.stringify(mergeHooks('codex', {}, entries)));
+  const hooks = Object.values(entries.events).flat().map(({ command }, i) => ({
+    key: `${entries.file}:${i}`, command, source: 'user', currentHash: `sha256:${i}`, trustStatus: i ? 'trusted' : 'untrusted',
+  }));
+  hooks.push({ key: 'other', command: 'echo other', source: 'user', trustStatus: 'untrusted' });
+  // A fake app-server: answers initialize and hooks/list, and records any other method.
+  write(path.join(home, 'bin/codex'), `#!${process.execPath}
+const fs = require('node:fs');
+let buffer = '';
+process.stdin.on('data', chunk => {
+  buffer += chunk;
+  for (let end; (end = buffer.indexOf('\\n')) >= 0; buffer = buffer.slice(end + 1)) {
+    const message = JSON.parse(buffer.slice(0, end));
+    if (message.method === 'initialize') console.log(JSON.stringify({ id: message.id, result: {} }));
+    else if (message.method === 'hooks/list') console.log(JSON.stringify({ id: message.id, result: { data: [{ hooks: ${JSON.stringify(hooks)} }] } }));
+    else if (message.method !== 'initialized') fs.writeFileSync(${JSON.stringify(path.join(home, 'unexpected-call'))}, message.method);
+  }
+});
+`);
+  fs.chmodSync(path.join(home, 'bin/codex'), 0o755);
+  const result = doctor('--agent', 'codex');
+  assert.equal(result.status, 0, result.stderr);
+  assert.match(result.stdout, /✓ hooks codex: definition marker found/);
+  assert.ok(result.stdout.includes(`! codex hook trust: ${entries.file}:0 (untrusted); rerun the installer or run /hooks in Codex`), result.stdout);
+  assert.equal(fs.existsSync(path.join(home, 'unexpected-call')), false, 'doctor must stay read-only');
 });

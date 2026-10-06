@@ -18,7 +18,8 @@ Git projects and separate clones receive automatic reviews by default; `scope di
 `scope enable` reverses an opt-out. Updating activates existing Git projects unless explicitly opted out. Non-Git directories stay off. Without `--agent`, doctor checks
 all hosts. It never starts a reviewer. A single configured CLI is supported; repeated CLI/model choices limit diversity.
 Restart the host, check reviewer sign-in yourself, and exercise a small plan/code review to verify native hooks.
-For Codex, doctor prints the required hook feature and writable root; it does not parse TOML or verify native trust.
+For Codex, doctor reports whether Codex trusts each cross-debate hook and prints the required hook feature and writable
+root; it does not parse TOML.
 
 To stop automatic reviews, run `npx --yes github:ahmed-hassan19/cross-debate scope disable --cwd "/path/to/project"`.
 Finish or explicitly waive any active candidate first. For complete removal, follow the authoritative
@@ -31,7 +32,8 @@ Finish or explicitly waive any active candidate first. For complete removal, fol
 | Missing reviewer or lane | Sign in to the intended CLI, put it on `PATH`, then rerun the installer to choose reviewers. |
 | Project override needs trust | Inspect `.delegate/config.json`; remove unintended overrides or explicitly trust the reviewed contents. See [configuration](configuration.md). |
 | Code lane uses a project binding | Keep `review-main` and `review-debate` in global fleet settings; remove their project overrides. |
-| Hook definition found but no review | Check the Git project scope, restart the host, and review native hook trust. Definitions alone do not prove execution. |
+| Hook definition found but no review | Check the Git project scope and restart the host. Definitions alone do not prove execution. |
+| `codex hook trust` warns untrusted or modified | Codex skips hooks until trusted, and a changed command needs trusting again. Rerun the installer, or run `/hooks` in Codex and trust the cross-debate hooks. |
 | Invalid JSON, TOML, or symlinked settings | Repair the settings file or resolve the symlink before rerunning; installation stops before Apply. |
 | Inline Codex writable roots cannot be preserved | Convert the inline object to a `[sandbox_workspace_write]` table, keeping all existing roots. |
 | Reviewer failed or was rate limited | Follow [failure recovery](../skills/cross-debate/references/operations.md#reviewer-failure-and-recovery); failure is not a passed review. |
@@ -68,7 +70,7 @@ writable_roots = ["/absolute/path/to/your-home/.local/share/debate"]
 
 Preview individual settings with `node "$D" setup lanes` or `node "$D" setup hooks --agent claude`.
 Add `--write` only in your own terminal. OpenCode lanes require `--opencode-model provider/model`.
-Restart, trust hooks when prompted, then follow [your first review](../README.md#your-first-review).
+Restart; in Codex, run `/hooks` and trust the cross-debate hooks; then follow [your first review](../README.md#your-first-review).
 
 The manual wizard also offers optional [ponytail](https://github.com/DietrichGebert/ponytail) complexity
 checks and babysit-pr from [review-skills](https://github.com/amElnagdy/review-skills) for posted-review follow-up.
