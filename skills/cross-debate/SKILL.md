@@ -53,7 +53,7 @@ in the foreground with a long command timeout. Never start a duplicate review wh
 
 ## Setup commands
 
-The recommended installer is `npx --yes github:ahmed-hassan19/cross-debate` (Node 22+), run by the user in their own terminal.
+The recommended installer is `npx --yes cross-debate` (Node 22+), run by the user in their own terminal.
 For a manual clone on Node 18+, `setup init` provides the text wizard. Never run either installer for the user.
 `setup lanes` and `setup hooks`
 print their changes; `--write` edits settings only after the user confirms in their own terminal. Never run

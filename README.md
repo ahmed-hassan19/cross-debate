@@ -30,7 +30,7 @@ GitHub PR reviews also need authenticated `gh`.
 Run in your own terminal from any directory:
 
 ```sh
-npx --yes github:ahmed-hassan19/cross-debate
+npx --yes cross-debate
 ```
 
 Choose your hosts and reviewers, then confirm **Apply these changes**. The skill and hooks install globally.
@@ -60,7 +60,7 @@ Discovery starts no review turn; if a CLI can't list models, the menu shows buil
 Run from your project, replacing `codex` with `claude`, `cursor`, or `opencode` as appropriate:
 
 ```sh
-npx --yes github:ahmed-hassan19/cross-debate setup doctor --agent codex
+npx --yes cross-debate setup doctor --agent codex
 ```
 
 Expect reviewer bindings, Git default or explicit opt-out status, and installed hook definitions, plus Codex hook trust. Sign-in and
@@ -90,13 +90,13 @@ Verify every finding and keep the candidate commit local.`
 To print a standalone review of the working tree:
 
 ```sh
-npx --yes github:ahmed-hassan19/cross-debate review --local
+npx --yes cross-debate review --local
 ```
 
 For a GitHub PR:
 
 ```sh
-npx --yes github:ahmed-hassan19/cross-debate review https://github.com/OWNER/REPO/pull/123 --dry-run
+npx --yes cross-debate review https://github.com/OWNER/REPO/pull/123 --dry-run
 ```
 
 Both standalone commands print consolidated findings. PR `--dry-run` **still runs models** and consumes usage;

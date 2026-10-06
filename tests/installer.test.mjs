@@ -367,7 +367,7 @@ test('handoff reports disabled automation and safely quotes a shell-sensitive pr
   assert.match(next, /Automatic reviews are on by default in Git projects; existing opt-outs stay in effect/);
   const optOut = next.split('\n').find(line => line.trim().startsWith('npx ') && line.includes('scope disable --cwd'));
   assert.ok(optOut.endsWith(`--cwd ${shellQuote(repo)}`));
-  const runnable = optOut.trim().replace('npx --yes github:ahmed-hassan19/cross-debate', `node ${shellQuote(path.resolve('bin/cross-debate.mjs'))}`);
+  const runnable = optOut.trim().replace('npx --yes cross-debate', `node ${shellQuote(path.resolve('bin/cross-debate.mjs'))}`);
   const disabled = spawnSync('/bin/sh', ['-c', runnable], { encoding: 'utf8' });
   assert.equal(disabled.status, 0, disabled.stderr);
   const state = JSON.parse(disabled.stdout);

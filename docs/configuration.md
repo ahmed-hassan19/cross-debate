@@ -1,6 +1,6 @@
 # Reviewer configuration
 
-Use `npx --yes github:ahmed-hassan19/cross-debate` to change reviewers. The wizard merges your choices while
+Use `npx --yes cross-debate` to change reviewers. The wizard merges your choices while
 preserving unrelated lanes. Settings live in `~/.config/delegate-skills/config.json`, or under `XDG_CONFIG_HOME`.
 
 A lane names a role; its `implementer` selects the reviewer CLI. Your seat is your host agent.
@@ -62,6 +62,6 @@ Use `setup doctor --agent <host> --cwd <project>` to see effective bindings and 
 | `DELEGATE_SKILLS_DIR` | Override the bundled delegate-skills scripts |
 | `~/.cache/debate-review/` | Standalone PR/local review artifacts |
 
-`npx --yes github:ahmed-hassan19/cross-debate stats --since 30d` shows local review statistics.
+`npx --yes cross-debate stats --since 30d` shows local review statistics.
 Claude's native permission allowlist matches literal paths; `setup hooks --agent claude` prints entries for
 the invoked catalog path and its resolved path. Workflow details stay in [operations](../skills/cross-debate/references/operations.md).

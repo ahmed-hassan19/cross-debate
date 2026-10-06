@@ -17,7 +17,7 @@ import { trustCodexHooks } from '../skills/cross-debate/scripts/lib/codex-hooks.
 const labels = { claude: 'Claude Code', codex: 'Codex', cursor: 'Cursor (experimental)', opencode: 'OpenCode (experimental)' };
 const reviewerCLIs = ['claude', 'codex', 'opencode'];
 const requiredLanes = ['plan-main', 'plan-debate', 'review-main', 'review-debate'];
-const installCommand = 'npx --yes github:ahmed-hassan19/cross-debate';
+const installCommand = 'npx --yes cross-debate';
 const anyOf = values => new Intl.ListFormat('en', { type: 'disjunction' }).format(values);
 const shortLabel = cli => labels[cli].replace(' (experimental)', '');
 // Lead = review-main + plan-debate; Challenger = review-debate + plan-main. Index matches the wizard's pair.
