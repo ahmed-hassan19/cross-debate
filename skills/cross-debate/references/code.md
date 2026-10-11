@@ -115,7 +115,6 @@ completes, reads the result with `code wait --run "<run>" --max-wait 1s`. Every 
 
 8. Finish:
    node "<cross-debate-dir>/scripts/debate.mjs" code finish --run "<run>"
-   Report candidate SHA, review outcome, relevant checks, and unresolved findings; the commit remains local.
    Unfixed blockers record blocked and keep the candidate active: while round < 3, amend the fix and code review --run "<run>" again on a changed tree.
    At round 3, exhausted_with_blockers stays frozen; only an explicitly approved waive can close it.
    Every waiver, including a prose typo/comment-only candidate, requires explicit user approval:
@@ -125,7 +124,24 @@ completes, reads the result with `code wait --run "<run>" --max-wait 1s`. Every 
    Security, auth, config, migration, and dependency changes are not trivial by size.
    Failure, blockers, secrets_detected, or unreviewed corrections require explicit user approval before waiver.
 
-9. Only after presenting the concrete result, ask whether to push this candidate to the named destination.
+   After review, finding verification, and verdict/finish processing, use exactly three sections in the final
+   code-candidate chat status report, in this order:
+
+   - **Changed:** summarize the implementation, identify the candidate SHA, and state publication status.
+   - **Found:** state the actual review outcome, relevant checks, and verified unresolved findings. Include
+     required failure, waiver, and unreviewed-change warnings; never describe waived or unreviewed content as passed.
+   - **Blocked on me:** name specific user decisions or approvals needed; write **None** when none are needed.
+     Ask for push approval here only when publication is required by the task, identifying the exact candidate
+     and destination after presenting the concrete result.
+
+   This code-specific order refines generic long-run reporting guidance; explicit user instructions still prevail.
+   Apply it only to final code-candidate chat status reports, not progress updates or intermediate questions.
+   Keep working while a review is running, as steps 1 and 4 require. For a stopped-run final report awaiting
+   input without a passed/waived receipt, use the required `code defer` from step 1 first and explicitly state
+   that the candidate remains incomplete and local. This includes an exhausted review awaiting waiver;
+   deferral never permits a completion claim or a push.
+
+9. Request push approval only when publication is required by the task, using **Blocked on me** as above.
    After explicit approval, and waiver first if required:
    node "<cross-debate-dir>/scripts/debate.mjs" code approve-push --run "<run>" --remote "<remote>" --ref "refs/heads/<branch>" --reason "user approved: <quote>"
    Execute only the exact push command returned; it starts with cd '<worktree>' && so it works from any tool
