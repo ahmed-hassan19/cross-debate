@@ -129,10 +129,12 @@ completes, reads the result with `code wait --run "<run>" --max-wait 1s`. Every 
 
    - **Changed:** summarize the implementation, identify the candidate SHA, and state publication status.
    - **Found:** state the actual review outcome, relevant checks, and verified unresolved findings. Include
-     required failure, waiver, and unreviewed-change warnings; never describe waived or unreviewed content as passed.
-   - **Blocked on me:** name specific user decisions or approvals needed; write **None** when none are needed.
-     Ask for push approval here only when publication is required by the task, identifying the exact candidate
-     and destination after presenting the concrete result.
+     skipped checks, limitations, and required failure, waiver, and unreviewed-change warnings; never describe
+     waived or unreviewed content as passed.
+   - **Blocked on me:** name specific user decisions or approvals needed; write **None for this task** when
+     none are needed. For a local candidate, also state that it remains local and that pushing or releasing
+     it would require explicit user approval. When publication is required by the task, replace that note
+     with an approval request identifying the exact candidate and destination after presenting the concrete result.
 
    This code-specific order refines generic long-run reporting guidance; explicit user instructions still prevail.
    Apply it only to final code-candidate chat status reports, not progress updates or intermediate questions.
