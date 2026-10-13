@@ -10,6 +10,7 @@ Usage:
   debate.mjs review <pr|--local> ...  two-model debate review of a GitHub PR or working tree (review --help)
   debate.mjs setup init|lanes|hooks|doctor configure reviewer lanes and host hooks, check the install (setup --help)
   debate.mjs scope enable|disable|status [--cwd <dir>] [--json]
+  debate.mjs scope git-gate enable|disable [--cwd <dir>] [--json]   lift or restore the commit/push gate; reviews stay on
   debate.mjs stats [--kind plan|code] [--seat ${SEATS.join('|')}] [--since 30d] [--json]
   debate.mjs hook <agent> <event>     host hook dispatcher (JSON payload on stdin)
 
@@ -22,8 +23,10 @@ function shared(argv) {
   if (flags.help) { process.stdout.write(HELP); return 0; }
   if (argv[0] === 'stats') { ensureHome(debateHome()); return statsCommand(flags, debateHome()); }
   const cwd = resolveCwdArg(flags.cwd ?? process.cwd());
-  if (positional.length !== 1 || !['enable', 'disable', 'status'].includes(positional[0])) throw usage('scope requires enable, disable, or status');
-  const result = positional[0] === 'status' ? { ok: true, ...repositoryScope(cwd) } : changeRepositoryScope(cwd, positional[0] === 'enable');
+  const gate = positional[0] === 'git-gate';
+  const action = gate ? positional[1] : positional[0];
+  if (positional.length !== (gate ? 2 : 1) || !(gate ? ['enable', 'disable'] : ['enable', 'disable', 'status']).includes(action)) throw usage('scope requires enable, disable, status, or git-gate enable|disable');
+  const result = action === 'status' ? { ok: true, ...repositoryScope(cwd) } : changeRepositoryScope(cwd, action === 'enable', debateHome(), gate ? 'debate.gitGate' : 'debate.enabled');
   // Agents run without a terminal and parse the JSON; a person at a terminal gets a summary unless they ask for --json.
   if (process.stdout.isTTY && !flags.json) process.stdout.write(scopeSummary(result));
   else printJson(result);
@@ -34,10 +37,11 @@ export function scopeSummary(r) {
   const lines = [r.identity
     ? `debate is ${r.enabled ? 'enabled' : 'disabled'} for ${r.identity.worktreeRoot}${r.enabled && !r.effective ? ', but automation is off' : ''}`
     : 'debate is disabled here: this directory is not a Git worktree'];
+  if (r.effective && r.gitGate === false) lines.push('git gate is off (debate.gitGate=false): commits and pushes are not enforced');
   for (const w of r.warnings || []) lines.push(`warning: ${w}`);
   if (r.supersededApprovals) lines.push(`${r.supersededApprovals} pending push approval(s) revoked`);
   if (r.activeCandidates?.length) lines.push(`${r.activeCandidates.length} active review candidate(s) in this repository`);
-  if (r.enabled && r.effective && r.supersededApprovals !== undefined) lines.push('Start a fresh agent session there; plan and code reviews now run automatically.');
+  if (r.enabled && r.effective && r.supersededApprovals !== undefined && r.changed !== 'debate.gitGate') lines.push('Start a fresh agent session there; plan and code reviews now run automatically.');
   lines.push('(--json prints the full result)');
   return `${lines.join('\n')}\n`;
 }

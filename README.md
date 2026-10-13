@@ -36,7 +36,8 @@ npx --yes cross-debate
 Choose your hosts and reviewers, then confirm **Apply these changes**. The skill and hooks install globally.
 Automatic reviews run in every Git project by default and consume reviewer-provider usage; use `scope disable`
 to opt out a repository and its linked worktrees. Updating activates existing Git projects unless they already
-have an explicit opt-out.
+have an explicit opt-out. To keep reviews but let the agent run ordinary Git commits and pushes in a project,
+use `scope git-gate disable`; `scope git-gate enable` restores the gate.
 The installer preserves unrelated settings and backs up replaced entries.
 For Codex, the installer also trusts the hooks it just added (only those), so they run without a `/hooks` visit.
 If it cannot, the final note tells you to run `/hooks` in Codex and trust them. Trust is per definition: after a

@@ -261,14 +261,22 @@ export function repoIdentity(cwd, opts = {}) {
 export function repositoryScope(cwd, { home = debateHome(), ...gitOpts } = {}) {
   const identity = repoIdentity(cwd, gitOpts);
   const warnings = [];
-  if (!identity) return { identity: null, configured: null, enabled: false, effective: false, warnings };
+  if (!identity) return { identity: null, configured: null, enabled: false, effective: false, gitGate: false, warnings };
   const r = git(identity.worktreeRoot, ['config', '--local', '--no-includes', '--type=bool', '--get-all', 'debate.enabled'], { ...gitOpts, allowFail: true });
   let configured = null;
   let valid = true;
   if (r.status === 0) configured = r.stdout.trim().split('\n').at(-1) === 'true';
   else if (r.status !== 1) { valid = false; warnings.push('invalid or unreadable local debate.enabled; defaulting to disabled'); log(warnings[0]); }
   const enabled = valid && configured !== false;
-  return { identity, configured, enabled, effective: enabled && !automationOff(home), warnings };
+  const effective = enabled && !automationOff(home);
+  // debate.gitGate=false keeps reviews but lifts the commit/push gate; an invalid value keeps the gate on.
+  let gitGate = effective;
+  if (effective) {
+    const g = git(identity.worktreeRoot, ['config', '--local', '--no-includes', '--type=bool', '--get-all', 'debate.gitGate'], { ...gitOpts, allowFail: true });
+    if (g.status === 0) gitGate = g.stdout.trim().split('\n').at(-1) !== 'false';
+    else if (g.status !== 1) { warnings.push('invalid or unreadable local debate.gitGate; keeping the Git gate on'); log(warnings.at(-1)); }
+  }
+  return { identity, configured, enabled, effective, gitGate, warnings };
 }
 export function withRepositoryScopeLock(cwd, fn, home = debateHome()) {
   if (!repoIdentity(cwd)) throw usage(`${cwd} is not inside a Git work tree`);
@@ -276,7 +284,7 @@ export function withRepositoryScopeLock(cwd, fn, home = debateHome()) {
   return withLock(path.join(home, 'scope-locks', `${sha256(commonDir)}.lock`), fn);
 }
 export function scopeWarning(cwd, home = debateHome()) {
-  return repositoryScope(cwd, { home }).effective ? [] : ['automatic debate guards are inactive: candidate lineage, push approval enforcement and permit consumption are not enforced; explicit user approval is still required'];
+  return repositoryScope(cwd, { home }).gitGate ? [] : ['automatic debate guards are inactive: candidate lineage, push approval enforcement and permit consumption are not enforced; explicit user approval is still required'];
 }
 /** Roots of every non-bare worktree of the repository that owns `root`, as Git lists them. */
 export function worktreeRoots(root, opts) {
@@ -288,7 +296,8 @@ export function worktreeRoots(root, opts) {
     return field.slice(9);
   });
 }
-export function changeRepositoryScope(cwd, enabled, home = debateHome()) {
+/** key is debate.enabled (scope enable/disable) or debate.gitGate (scope git-gate enable/disable); both revoke pending approvals. */
+export function changeRepositoryScope(cwd, enabled, home = debateHome(), key = 'debate.enabled') {
   const initial = repositoryScope(cwd, { home });
   if (!initial.identity) throw usage('scope enable/disable requires a Git worktree');
   const root = initial.identity.worktreeRoot;
@@ -306,22 +315,22 @@ export function changeRepositoryScope(cwd, enabled, home = debateHome()) {
     return locked(0, () => {
       const ledgers = identities.map(id => ({ id, ledger: loadLedger(home, id.repoKey) }));
       const active = ledgers.filter(x => x.ledger?.active);
-      if (!enabled && active.length) throw usage(`cannot disable with active candidates: ${active.map(x => `${x.ledger.active.runId} in ${x.id.worktreeRoot}`).join(', ')}; finish or explicitly waive them first`);
+      if (!enabled && key === 'debate.enabled' && active.length) throw usage(`cannot disable with active candidates: ${active.map(x => `${x.ledger.active.runId} in ${x.id.worktreeRoot}`).join(', ')}; finish or explicitly waive them first`);
       const at = nowIso();
       let superseded = 0;
       for (const { ledger } of ledgers) {
         if (!ledger) continue;
         const pending = ledger.approvals.filter(a => a.consumedAt === null);
         for (const a of pending) {
-          a.consumedAt = `superseded:scope-${enabled ? 'enable' : 'disable'}:${at}`;
-          auditEvent(ledger, { type: 'push_approval_superseded', approvalId: a.approvalId, reason: 'scope_transition', enabled });
+          a.consumedAt = `superseded:${key === 'debate.gitGate' ? 'git-gate' : 'scope'}-${enabled ? 'enable' : 'disable'}:${at}`;
+          auditEvent(ledger, { type: 'push_approval_superseded', approvalId: a.approvalId, reason: 'scope_transition', key, enabled });
         }
         superseded += pending.length;
         // Revocation is safe even if a later write fails: config changes only after all ledgers were saved.
         if (pending.length) { ledger.updatedAt = at; writeJson(ledgerPath(home, ledger.repoKey), ledger); }
       }
-      git(root, ['config', '--local', '--replace-all', 'debate.enabled', String(enabled)]);
-      return { ok: true, ...repositoryScope(root, { home }), supersededApprovals: superseded, worktrees: roots, activeCandidates: active.map(x => ({ runId: x.ledger.active.runId, worktree: x.id.worktreeRoot })) };
+      git(root, ['config', '--local', '--replace-all', key, String(enabled)]);
+      return { ok: true, ...repositoryScope(root, { home }), changed: key, supersededApprovals: superseded, worktrees: roots, activeCandidates: active.map(x => ({ runId: x.ledger.active.runId, worktree: x.id.worktreeRoot })) };
     });
   }, home);
 }
@@ -824,14 +833,14 @@ export function gitGateDecision({ command, cwd, home, gitOpts = {} }) {
   const contexts = muts.map(m => {
     const dir = resolveMutationDir(m, cwd);
     const identity = dir && fs.existsSync(dir) ? repoIdentity(dir, gitOpts) : null;
-    return { m, dir, identity, ledger: identity && repositoryScope(dir, { home, ...gitOpts }).effective ? loadLedger(home, identity.repoKey) : null };
+    return { m, dir, identity, ledger: identity && repositoryScope(dir, { home, ...gitOpts }).gitGate ? loadLedger(home, identity.repoKey) : null };
   });
   const unknown = contexts.filter(c => !c.identity);
   const ownersActive = contexts.filter(c => c.ledger && c.ledger.active);
   if (!ownersActive.length) {
     if (!unknown.length) return { decision: 'pass' };
     const base = repoIdentity(cwd, gitOpts);
-    const baseLedger = base && repositoryScope(cwd, { home, ...gitOpts }).effective ? loadLedger(home, base.repoKey) : null;
+    const baseLedger = base && repositoryScope(cwd, { home, ...gitOpts }).gitGate ? loadLedger(home, base.repoKey) : null;
     if (!baseLedger || !baseLedger.active) return { decision: 'pass' };
     return { decision: 'deny', reason: `debate-code: run ${baseLedger.active.runId} owns the active candidate in ${base.worktreeRoot}; a commit whose target directory cannot be resolved literally is not allowed. Use a plain "git commit" or "git commit --amend --no-edit" in that worktree.` };
   }
@@ -864,7 +873,7 @@ function pushGate(m, cwd, home, gitOpts) {
   return withRepositoryScopeLock(dir, () => pushGateScoped(m, identity, home, gitOpts, denyDefault), home);
 }
 function pushGateScoped(m, identity, home, gitOpts, denyDefault) {
-  if (!repositoryScope(identity.worktreeRoot, { home, ...gitOpts }).effective) return { decision: 'pass' };
+  if (!repositoryScope(identity.worktreeRoot, { home, ...gitOpts }).gitGate) return { decision: 'pass' };
   const args = m.args;
   if (args[0] !== PUSH_FIXED_ARGS[0] || args[1] !== PUSH_FIXED_ARGS[1]) return denyDefault('unexpected arguments');
   if (args.length === 5 && args[2].startsWith('--force-with-lease=')) return deleteGateScoped(args, identity, home, gitOpts, denyDefault);
@@ -874,7 +883,7 @@ function pushGateScoped(m, identity, home, gitOpts, denyDefault) {
   if (!rm || remote.startsWith('-')) return denyDefault('refspec must be <full-sha>:refs/heads/<branch>');
   const [, sha, destinationRef] = rm;
   const ledger = loadLedger(home, identity.repoKey);
-  const approval = ledger && ledger.approvals.find(a => a.kind !== 'delete' && a.consumedAt === null && a.commitSha === sha && a.remote === remote && a.destinationRef === destinationRef);
+  const approval = ledger && ledger.approvals.find(a => a.kind !== 'delete' && a.consumedAt === null && !a.ungated && a.commitSha === sha && a.remote === remote && a.destinationRef === destinationRef);
   if (!approval) return denyDefault(`no unconsumed approval for ${sha.slice(0, 12)} → ${remote} ${destinationRef}`);
   const urls = remotePushUrls(identity.worktreeRoot, remote, gitOpts);
   if (!urls || urls.length !== 1 || urls[0] !== approval.pushUrl) return denyDefault(`remote ${remote} no longer resolves to the approved URL`);
@@ -888,7 +897,7 @@ function deleteGateScoped(args, identity, home, gitOpts, denyDefault) {
   if (!lm || refspec !== `:${lm[1]}` || remote.startsWith('-')) return denyDefault('a branch delete must be --force-with-lease=refs/heads/<branch>:<full-sha> <remote> :refs/heads/<branch>');
   const [, destinationRef, sha] = lm;
   const ledger = loadLedger(home, identity.repoKey);
-  const approval = ledger && ledger.approvals.find(a => a.kind === 'delete' && a.consumedAt === null && a.commitSha === sha && a.remote === remote && a.destinationRef === destinationRef);
+  const approval = ledger && ledger.approvals.find(a => a.kind === 'delete' && a.consumedAt === null && !a.ungated && a.commitSha === sha && a.remote === remote && a.destinationRef === destinationRef);
   if (!approval) return denyDefault(`no unconsumed delete approval for ${destinationRef} at ${sha.slice(0, 12)} on ${remote}`);
   const urls = remotePushUrls(identity.worktreeRoot, remote, gitOpts);
   if (!urls || urls.length !== 1 || urls[0] !== approval.pushUrl) return denyDefault(`remote ${remote} no longer resolves to the approved URL`);

@@ -1270,6 +1270,39 @@ test('deferral sequence: block, defer, stop_hook_active consumes, next prompt, u
   assert.equal(hook('claude', 'Stop', hookPayload(sid, repo)).output.decision, 'block');
 });
 
+test('debate.gitGate=false lets Git commands through while reviews stay on; invalid values keep the gate', () => {
+  const repo = makeRepo();
+  const sid = 'sess-gitgate-off';
+  const decide = (command, cwd = repo) => common.gitGateDecision({ command, cwd, home: HOME });
+  assert.equal(cli('scope', ['git-gate', 'disable', '--cwd', repo, '--json']).status, 0);
+  assert.equal(gitc(repo, 'config', '--local', 'debate.gitGate'), 'false');
+  for (const bad of [['git-gate'], ['git-gate', 'status'], ['git-gate', 'off']]) assert.equal(cli('scope', [...bad, '--cwd', repo]).status, 2, bad.join(' '));
+  const scope = common.repositoryScope(repo, { home: HOME });
+  assert.equal(scope.effective, true);
+  assert.equal(scope.gitGate, false);
+  assert.equal(cli('scope', ['status', '--cwd', repo, '--json']).json.gitGate, false);
+  assert.match(common.scopeWarning(repo, HOME)[0] ?? '', /guards are inactive/);
+  hook('claude', 'SessionStart', hookPayload(sid, repo));
+  assert.equal(cli('code', ['begin', '--seat', 'claude', '--session', sid, '--cwd', repo]).json.ok, true);
+  const midRun = cli('scope', ['git-gate', 'disable', '--cwd', repo, '--json']);
+  assert.equal(midRun.status, 0, midRun.stdout + midRun.stderr);
+  fs.writeFileSync(path.join(repo, 'feature.py'), 'x = 1\n');
+  gitc(repo, 'add', '-A');
+  gitc(repo, 'commit', '-q', '-m', 'feat: x');
+  for (const command of ['git commit -m "feat: y"', 'git commit --no-verify -m "test: red"', 'git push origin main', 'git push -u origin feat/x']) assert.equal(decide(command).decision, 'pass', command);
+  for (const command of ['(git push origin main)', 'git push "unterminated', 'sudo git push origin main']) assert.equal(decide(command).decision, 'deny', command);
+  assert.equal(hook('claude', 'Stop', hookPayload(sid, repo)).output.decision, 'block');
+  gitc(repo, 'config', '--local', 'debate.gitGate', 'invalid');
+  const invalid = common.repositoryScope(repo, { home: HOME });
+  assert.equal(invalid.gitGate, true);
+  assert.equal(invalid.warnings.length, 1);
+  assert.match(invalid.warnings[0], /debate\.gitGate/);
+  assert.match(decide('git commit -m "feat: y"').reason, /already has candidate/);
+  // the switch works with an active candidate (unlike scope disable) and restores the gate
+  assert.equal(cli('scope', ['git-gate', 'enable', '--cwd', repo, '--json']).json.gitGate, true);
+  assert.equal(common.repositoryScope(repo, { home: HOME }).enabled, true);
+});
+
 test('git gate: silent without candidate, first commit allowed, second denied, amend allowed, composed cd/-C, unsupported forms, harmless commands, competing session and separate worktree', () => {
   const repo = makeRepo();
   const other = makeRepo();
@@ -2253,6 +2286,21 @@ test('delete approval: merged PR at the push destination, exact lease command, c
   const fromDollar = approveDelete({}, { FAKE_GH_JSON: prJson({ headRefOid: moved }) }, dollar).json;
   assert.equal(fromDollar.ok, true, JSON.stringify(fromDollar));
   assert.equal(common.gitGateDecision({ command: fromDollar.command, cwd: SCRATCH, home: HOME }).decision, 'pass');
+
+  // an approval recorded while debate.gitGate=false is never consumed there, so it must not become a permit once the gate returns
+  gitc(dollar, 'config', '--local', 'debate.gitGate', 'false');
+  const ungated = approveDelete({}, { FAKE_GH_JSON: prJson({ headRefOid: moved }) }, dollar).json;
+  assert.equal(ungated.ok, true, JSON.stringify(ungated));
+  assert.equal(ungated.approval.ungated, true);
+  assert.equal(common.gitGateDecision({ command: ungated.command, cwd: SCRATCH, home: HOME }).decision, 'pass');
+  gitc(dollar, 'config', '--local', '--unset-all', 'debate.gitGate');
+  assert.match(common.gitGateDecision({ command: ungated.command, cwd: SCRATCH, home: HOME }).reason, /no unconsumed delete approval/);
+  // the git-gate switch revokes pending approvals in both directions, like scope enable/disable
+  const gated = approveDelete({}, { FAKE_GH_JSON: prJson({ headRefOid: moved }) }, dollar).json;
+  common.changeRepositoryScope(dollar, false, HOME, 'debate.gitGate');
+  const dollarApprovals = () => common.loadLedger(HOME, common.repoIdentity(dollar).repoKey).approvals;
+  assert.match(dollarApprovals().find(a => a.approvalId === gated.approval.approvalId).consumedAt, /^superseded:git-gate-disable/);
+  common.changeRepositoryScope(dollar, true, HOME, 'debate.gitGate');
 
   // opted-out repos still record the approval, with the scope warning
   const plain = makeRepo(undefined, { enrolled: false });

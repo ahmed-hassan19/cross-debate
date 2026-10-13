@@ -368,7 +368,7 @@ async function doctorCommand(flags) {
   const available = REVIEWER_CLIS.filter(onPath);
   add(available.length ? 'ok' : 'fail', 'reviewer CLIs', available.join(', ') || 'none on PATH');
   const scope = repositoryScope(cwd);
-  add(scope.warnings.length ? 'warn' : 'ok', 'automatic reviews', !scope.identity ? 'off: not a Git repository' : scope.warnings.length ? scope.warnings.join('; ') : scope.enabled ? `on: ${scope.configured === null ? 'Git default' : 'explicitly enabled'}${scope.effective ? '' : ' (session off)'}` : 'off: explicit project opt-out');
+  add(scope.warnings.length ? 'warn' : 'ok', 'automatic reviews', !scope.identity ? 'off: not a Git repository' : scope.warnings.length ? scope.warnings.join('; ') : scope.enabled ? `on: ${scope.configured === null ? 'Git default' : 'explicitly enabled'}${scope.effective ? '' : ' (session off)'}${scope.effective && !scope.gitGate ? ' (git gate off)' : ''}` : 'off: explicit project opt-out');
   const { lanes, checks } = await reviewerReadiness(cwd, { seats });
   for (const { lane, entry, ok, error } of checks) {
     const binding = entry ? `${entry.implementer} ${entry.model || '(CLI default model)'}${entry.effort ? ` effort=${entry.effort}` : ''}${entry.variant ? ` variant=${entry.variant}` : ''} (${entry.source})` : '';

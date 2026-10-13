@@ -752,7 +752,7 @@ function approvePushCommand(flags) {
   if (urls.length !== 1) throw usage(`remote ${flags.remote} has ${urls.length} push URLs; approve-push requires exactly one destination`);
   if (remoteIsMirror(root, flags.remote)) throw usage(`remote ${flags.remote} is configured as a mirror; refusing`);
   const session = loadSession(home, run.seat, run.sessionId);
-  const approval = { approvalId: crypto.randomUUID(), runId: run.runId, sessionId: run.sessionId, seat: run.seat, generation: session ? session.generation : 0, commitSha: head, treeId: run.code.candidateTree, remote: flags.remote, pushUrl: urls[0], destinationRef: ref, reason: flags.reason, at: nowIso(), consumedAt: null };
+  const approval = { approvalId: crypto.randomUUID(), runId: run.runId, sessionId: run.sessionId, seat: run.seat, generation: session ? session.generation : 0, commitSha: head, treeId: run.code.candidateTree, remote: flags.remote, pushUrl: urls[0], destinationRef: ref, reason: flags.reason, at: nowIso(), consumedAt: null, ...(scopeWarning(root, home).length ? { ungated: true } : {}) };
   const pending = gitText(root, ['log', '--format=%H%x00%s', head, '--not', '--remotes']).split('\n').filter(Boolean).map(l => { const [sha, subject] = l.split('\0'); return { sha, subject }; });
   updateLedger(home, identity, (l) => {
     for (const a of l.approvals) if (a.consumedAt === null && a.runId === run.runId) a.consumedAt = `superseded:${approval.at}`;
@@ -820,7 +820,7 @@ function approveDeleteCommand(flags) {
   if (prRepo.toLowerCase() !== headRepo.toLowerCase()) throw usage(`${flags.pr} head repository is ${prRepo}, but ${remote} pushes to ${headRepo}; update the remote URL if the repository was renamed`);
   return withRepositoryScopeLock(root, () => {
     if (singlePushUrl(root, remote) !== pushUrl) throw usage(`remote ${remote} push URL changed during approval`);
-    const approval = { approvalId: crypto.randomUUID(), kind: 'delete', runId: null, sessionId: null, seat: null, commitSha: dest.tip, remote, pushUrl, destinationRef: ref, prUrl: flags.pr, reason: flags.reason, at: nowIso(), consumedAt: null };
+    const approval = { approvalId: crypto.randomUUID(), kind: 'delete', runId: null, sessionId: null, seat: null, commitSha: dest.tip, remote, pushUrl, destinationRef: ref, prUrl: flags.pr, reason: flags.reason, at: nowIso(), consumedAt: null, ...(scopeWarning(root, home).length ? { ungated: true } : {}) };
     updateLedger(home, identity, (l) => {
       for (const a of l.approvals) if (a.consumedAt === null && a.kind === 'delete' && a.remote === remote && a.destinationRef === ref) a.consumedAt = `superseded:${approval.at}`;
       l.approvals.push(approval);

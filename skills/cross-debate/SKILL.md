@@ -29,6 +29,9 @@ allowlists match. Do not assume a username, home directory, or skill installatio
   requirements for pushing still apply even though the automatic guards are inactive.
 - Unsupported push syntax remains rejected even outside automatic scope; ordinary literal pushes in
   opted-out worktrees bypass the permit gate.
+- `scope git-gate disable --cwd <project>` keeps automatic reviews but lifts the commit/push gate, as in an
+  opted-out repository; `scope git-gate enable` restores it. Run either only on explicit user request; push
+  approval is still required. Squash to one candidate before `code review`.
 - `DEBATE=off` disables the hooks for a session; use it only on an explicit user opt-out.
 
 ## Route

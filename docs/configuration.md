@@ -59,6 +59,7 @@ Use `setup doctor --agent <host> --cwd <project>` to see effective bindings and 
 |---|---|
 | `DEBATE_HOME` | Plan/code state and receipts, default `~/.local/share/debate` |
 | `DEBATE=off` | Explicitly disable hooks for a session |
+| `debate.mjs scope git-gate disable\|enable --cwd <repo>` | Keep automatic reviews but lift (or restore) the commit/push gate for one repository (`debate.gitGate`) |
 | `DELEGATE_SKILLS_DIR` | Override the bundled delegate-skills scripts |
 | `~/.cache/debate-review/` | Standalone PR/local review artifacts |
 
