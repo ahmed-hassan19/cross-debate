@@ -3,8 +3,8 @@ import fs from 'node:fs';
 const root = new URL('../../', import.meta.url);
 const roles = {
   main: { template: 'review-main.md', section: 1, schema: 'SCHEMA_FINDINGS', fields: ['BASE', 'HEAD', 'PR_TITLE', 'PR_BODY', 'SPEC', 'STANDARDS'] },
-  debate: { template: 'review-debate.md', section: 2, schema: 'SCHEMA_DEBATE', fields: ['BASE', 'HEAD', 'FINDINGS_JSON'] },
-  final: { template: 'review-rebuttal.md', section: 3, schema: 'SCHEMA_FINAL', fields: ['BASE', 'HEAD', 'FINDINGS_JSON', 'DEBATE_JSON'] },
+  debate: { template: 'review-debate.md', section: 2, schema: 'SCHEMA_DEBATE', fields: ['BASE', 'HEAD', 'STANDARDS', 'FINDINGS_JSON'] },
+  final: { template: 'review-rebuttal.md', section: 3, schema: 'SCHEMA_FINAL', fields: ['BASE', 'HEAD', 'STANDARDS', 'FINDINGS_JSON', 'DEBATE_JSON'] },
 };
 
 /** Keep each role's input limited to its template contract, including on future template edits. */
