@@ -40,16 +40,17 @@ function repo(name) {
   write(dir, 'src/CLAUDE.local.md', 'head local instruction\n');
   write(dir, 'lib/claude.md', 'head lowercase instruction\n');
   write(dir, 'lib/Agents.Override.md', 'head mixed-case instruction\n');
+  write(dir, 'docs/AGENT\u017F.md', 'head lookalike instruction\n');
   write(dir, 'src/app.js', 'export const x = 2;\n');
   git(dir, 'add', '-A');
   git(dir, 'commit', '-q', '-m', 'feat: head');
   return { dir, base };
 }
 
-test('quarantine removes tracked instruction files at every depth and keeps other files', () => {
+test('quarantine removes tracked instruction files at every depth, in any case or lookalike spelling, and keeps other files', () => {
   const { dir } = repo('quarantine');
   const removed = quarantineInstructions(dir).sort();
-  assert.deepEqual(removed, ['AGENTS.md', 'CLAUDE.md', 'lib/Agents.Override.md', 'lib/claude.md', 'src/AGENTS.md', 'src/CLAUDE.local.md']);
+  assert.deepEqual(removed, ['AGENTS.md', 'CLAUDE.md', 'docs/AGENT\u017F.md', 'lib/Agents.Override.md', 'lib/claude.md', 'src/AGENTS.md', 'src/CLAUDE.local.md']);
   for (const rel of removed) assert.ok(!fs.existsSync(path.join(dir, rel)) && !isLink(path.join(dir, rel)), rel);
   assert.ok(fs.existsSync(path.join(dir, 'CONTRIBUTING.md')));
   assert.ok(fs.existsSync(path.join(dir, 'src/app.js')));
