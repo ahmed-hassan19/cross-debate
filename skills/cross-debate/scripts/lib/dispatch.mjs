@@ -11,6 +11,13 @@ import { findScript, loadLaneConfig, relaySupportsReadOnly, childEnv, cliCommand
 const DIAL_FLAGS = { model: '--model', effort: '--effort', variant: '--variant', provider: '--provider' };
 
 /**
+ * Reviewer CLIs also skip the checkout's instruction files themselves, behind review.mjs's quarantine. Codex has no
+ * such switch its relay forwards, so it relies on the quarantine alone. Claude's switch drops the user's CLAUDE.md
+ * too, which keeps reviewers to their self-contained briefs.
+ */
+const NO_PROJECT_INSTRUCTIONS = { CLAUDE_CODE_DISABLE_CLAUDE_MDS: '1', OPENCODE_DISABLE_PROJECT_CONFIG: '1' };
+
+/**
  * Decide who plays a role. An explicit implementer wins; otherwise read the lane from the fleet config.
  * Returns { implementer, lane, dials }. lane is null and dials empty when the implementer was given explicitly.
  * The lane resolves here, against the user's repository: the relay runs in the reviewed checkout, where a
@@ -58,7 +65,7 @@ export function dispatch({ role, who, brief, cwd, outDir, timeout }) {
 
   log(`${role}: ${who.implementer}${who.lane ? ` (lane ${who.lane})` : ''} …`);
   const started = Date.now();
-  const proc = spawnSync(process.execPath, args, { encoding: 'utf8', maxBuffer: 64 * 1024 * 1024, stdio: ['ignore', 'pipe', 'inherit'], env: childEnv() });
+  const proc = spawnSync(process.execPath, args, { encoding: 'utf8', maxBuffer: 64 * 1024 * 1024, stdio: ['ignore', 'pipe', 'inherit'], env: childEnv(NO_PROJECT_INSTRUCTIONS) });
   const seconds = Math.round((Date.now() - started) / 1000);
 
   const resultPath = path.join(dir, 'result.json');
