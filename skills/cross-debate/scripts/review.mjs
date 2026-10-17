@@ -186,6 +186,7 @@ function removeWorktree(clone, dir) {
 /**
  * Instruction files reviewer CLIs load on their own (Claude: CLAUDE.md; Codex and OpenCode: AGENTS.md), at any depth.
  * Lowercase: matching ignores case, because on a case-insensitive filesystem `claude.md` answers an open of `CLAUDE.md`.
+ * NFKC first: APFS also folds lookalikes such as `ſ` (U+017F), so `AGENTſ.md` answers an open of `AGENTS.md`.
  */
 export const INSTRUCTION_FILES = new Set(['claude.md', 'claude.local.md', 'agents.md', 'agents.override.md']);
 
@@ -195,7 +196,7 @@ export const INSTRUCTION_FILES = new Set(['claude.md', 'claude.local.md', 'agent
  */
 export function quarantineInstructions(worktree) {
   const tracked = run('git', ['-C', worktree, 'ls-files', '-z']).stdout.split('\0').filter(Boolean);
-  const removed = tracked.filter(rel => INSTRUCTION_FILES.has(path.posix.basename(rel).toLowerCase())
+  const removed = tracked.filter(rel => INSTRUCTION_FILES.has(path.posix.basename(rel).normalize('NFKC').toLowerCase())
     && !throughSymlink(worktree, rel));
   for (const rel of removed) fs.rmSync(path.join(worktree, rel), { force: true });
   return removed;
