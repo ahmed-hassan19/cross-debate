@@ -16,8 +16,18 @@ function statusPhrase(f) {
   return 'agreed by both reviewers.';
 }
 
-/** One inline comment. The HTML marker stays first so babysit-pr and the re-run check find it. */
-export function renderInline(f) {
+/** A GitHub suggestion block, fenced longer than any backtick run inside so the content cannot close it. */
+export function suggestionBlock(text) {
+  const longest = Math.max(0, ...(text.match(/`+/g) || []).map(run => run.length));
+  const fence = '`'.repeat(Math.max(3, longest + 1));
+  return `${fence}suggestion\n${text.replace(/\n$/, '')}\n${fence}`;
+}
+
+/**
+ * One inline comment. The HTML marker stays first so babysit-pr and the re-run check find it.
+ * `suggestion` is passed only after the caller checked the anchor covers exactly the replaced lines.
+ */
+export function renderInline(f, suggestion) {
   const level = levelOf(f);
   const quote = (text) => text.split('\n').map(l => `> ${l}`.trimEnd()).join('\n');
   let body = `<!-- debate-review:${f.id} status=${f.status} severity=${f.severity} level=${level} -->\n`;
@@ -25,6 +35,7 @@ export function renderInline(f) {
   body += quote(`**${level}, ${statusPhrase(f)}** ${f.claim}`) + '\n\n';
   if (f.evidence) body += `${f.evidence}\n\n`;
   if (f.recommendation) body += `Suggested: ${f.recommendation}\n\n`;
+  if (suggestion !== undefined) body += `${suggestionBlock(suggestion)}\n\n`;
   if (f.debate_note) body += `_${f.debate_note}_\n`;
   return body;
 }

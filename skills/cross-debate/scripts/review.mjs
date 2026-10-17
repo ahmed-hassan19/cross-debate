@@ -216,38 +216,123 @@ function throughSymlink(worktree, rel) {
   return false;
 }
 
-/** Files that document how code should be written in this repo (the Standards axis). */
-const STANDARDS = ['CONTRIBUTING.md', 'CODING_STANDARDS.md', 'CLAUDE.md', 'AGENTS.md', '.github/PULL_REQUEST_TEMPLATE.md', 'docs/agents'];
+/** Files that document how code should be written in this repo (the Standards axis), in listing order. */
+const ROOT_STANDARDS = ['CONTRIBUTING.md', 'CODING_STANDARDS.md', 'CLAUDE.md', 'AGENTS.md', '.github/PULL_REQUEST_TEMPLATE.md',
+  '.github/copilot-instructions.md', '.cursorrules'];
+const NESTED_STANDARDS = ['CLAUDE.md', 'AGENTS.md'];
+const STANDARDS_DIRS = ['docs/agents', '.cursor/rules'];
 const STANDARDS_MAX_BYTES = 100 * 1024;
+const STANDARDS_MAX_FILES = 20;
+const PATHSPEC_CHUNK = 500;
 
 /**
  * Standards as of the base commit, never the head: a change must not rewrite the rules it is judged by.
+ * Nested CLAUDE.md/AGENTS.md come from each ancestor directory of a changed path and apply at or below it.
  * Regular-file blobs only, so symlinks (mode 120000) and submodules are never followed.
+ * Ordered root files, then nested deepest-first, then directory entries, so the cap drops the least specific.
  */
-export function findStandards(worktree, baseRef) {
-  const listing = run('git', ['-C', worktree, 'ls-tree', '-r', '-l', '-z', baseRef, '--', ...STANDARDS]).stdout;
-  const entries = [];
-  for (const record of listing.split('\0').filter(Boolean)) {
-    const tab = record.indexOf('\t');
-    const [mode, type, oid, size] = record.slice(0, tab).split(/ +/);
-    if (type !== 'blob' || (mode !== '100644' && mode !== '100755')) continue;
-    if (Number(size) > STANDARDS_MAX_BYTES) continue;
-    entries.push({ path: record.slice(tab + 1), oid });
+export function findStandards(worktree, baseRef, changed = []) {
+  const dirs = new Set();
+  for (const rel of changed) {
+    const parts = rel.split('/').slice(0, -1);
+    for (let i = 1; i <= parts.length; i++) dirs.add(parts.slice(0, i).join('/'));
   }
-  return entries;
+  const nested = [...dirs].flatMap(dir => NESTED_STANDARDS.map(name => `${dir}/${name}`));
+  const wanted = new Set([...ROOT_STANDARDS, ...nested]);
+  const specs = [...wanted, ...STANDARDS_DIRS];
+
+  const found = new Map();
+  for (let i = 0; i < specs.length; i += PATHSPEC_CHUNK) {
+    const chunk = specs.slice(i, i + PATHSPEC_CHUNK);
+    const listing = run('git', ['--literal-pathspecs', '-C', worktree, 'ls-tree', '-r', '-l', '-z', baseRef, '--', ...chunk]).stdout;
+    for (const record of listing.split('\0').filter(Boolean)) {
+      const tab = record.indexOf('\t');
+      const [mode, type, oid, size] = record.slice(0, tab).split(/ +/);
+      const rel = record.slice(tab + 1);
+      if (type !== 'blob' || (mode !== '100644' && mode !== '100755')) continue;
+      if (Number(size) > STANDARDS_MAX_BYTES) continue;
+      if (!wanted.has(rel) && !STANDARDS_DIRS.some(dir => rel.startsWith(`${dir}/`))) continue;
+      found.set(rel, oid);
+    }
+  }
+
+  const depth = rel => rel.split('/').length;
+  const roots = ROOT_STANDARDS.filter(rel => found.has(rel));
+  const nestedFound = nested.filter(rel => found.has(rel)).sort((a, b) => depth(b) - depth(a) || a.localeCompare(b));
+  const dirEntries = [...found.keys()].filter(rel => STANDARDS_DIRS.some(dir => rel.startsWith(`${dir}/`))).sort();
+  const ordered = [...roots, ...new Set([...nestedFound, ...dirEntries])].map(rel => ({
+    path: rel,
+    oid: found.get(rel),
+    scope: nestedFound.includes(rel) ? `${path.posix.dirname(rel)}/**` : null,
+  }));
+  return { entries: ordered.slice(0, STANDARDS_MAX_FILES), omitted: Math.max(0, ordered.length - STANDARDS_MAX_FILES) };
 }
 
 /** Write base copies under `.debate-review/standards/` with a `.txt` suffix, so no CLI loads them as instructions. */
-export function writeStandards(worktree, inputDir, entries) {
+export function writeStandards(worktree, inputDir, { entries, omitted }) {
   const listed = [];
   for (const entry of entries) {
     const rel = path.posix.join('standards', `${entry.path}.txt`);
     const dest = path.join(inputDir, rel);
     fs.mkdirSync(path.dirname(dest), { recursive: true });
     fs.writeFileSync(dest, run('git', ['-C', worktree, 'cat-file', 'blob', entry.oid], { encoding: 'buffer' }).stdout, { flag: 'wx' });
-    listed.push(`\`.debate-review/${rel}\` (base copy of \`${entry.path}\`)`);
+    const scope = entry.scope ? `, applies to \`${entry.scope}\`` : '';
+    listed.push(`\`.debate-review/${rel}\` (base copy of \`${entry.path}\`${scope})`);
   }
-  return listed.length ? listed.join(', ') : 'none found at the base commit, skip the Standards axis';
+  if (!listed.length) return 'none found at the base commit, skip the Standards axis';
+  return listed.join(', ') + (omitted ? `; ${omitted} more standards file(s) omitted by the ${STANDARDS_MAX_FILES}-file cap` : '');
+}
+
+// ============================================================ findings
+
+/**
+ * Efficiency findings are advisory, so never blocking. A stray label is corrected rather than failing the run,
+ * which would discard finished reviewer passes. The debate pass may not add efficiency findings at all: its
+ * gap sweep is blocking-only. Returns the warnings.
+ */
+export function coerceEfficiency(doc, stage) {
+  const warnings = [];
+  if (stage === 'debate') {
+    for (const f of doc.new_findings) if (f.axis === 'efficiency') warnings.push(`debate: dropped ${f.id}, efficiency is outside the gap sweep`);
+    doc.new_findings = doc.new_findings.filter(f => f.axis !== 'efficiency');
+    return warnings;
+  }
+  for (const f of doc.findings) {
+    if (f.axis === 'efficiency' && f.severity === 'blocking') {
+      f.severity = 'non-blocking';
+      warnings.push(`${stage}: ${f.id} is an efficiency finding, made non-blocking`);
+    }
+  }
+  return warnings;
+}
+
+/**
+ * After the final stage: take each entry's axis from its original F* or D* finding (the final schema carries none), keep
+ * efficiency non-blocking, and attach the original suggestion only when the final ruling left its location
+ * unchanged, the debate confirmed it (confirm covers the replacement), and the final stage did not veto it
+ * with `suggestion: null`. The final stage never authors a suggestion. Returns warnings.
+ */
+export function finalizeFindings(finalDoc, findings, debate) {
+  const originals = new Map([...findings.findings, ...debate.new_findings].map(f => [f.id, f]));
+  const verdicts = new Map(debate.verdicts.map(v => [v.id, v.verdict]));
+  for (const f of finalDoc.findings) {
+    const original = originals.get(f.id);
+    f.axis = original.axis ?? f.axis;
+    const vetoed = f.suggestion === null;
+    delete f.suggestion;
+    const sameRange = f.file === original.file && f.line_start === original.line_start && f.line_end === original.line_end;
+    const endorsed = !vetoed && f.status === 'agreed' && (f.id.startsWith('D') || verdicts.get(f.id) === 'confirm');
+    if (original.suggestion !== undefined && sameRange && endorsed) f.suggestion = original.suggestion;
+  }
+  return coerceEfficiency(finalDoc, 'final');
+}
+
+/** The suggestion to render, only when the posted anchor covers exactly the finding's lines. */
+export function gateSuggestion(a, f) {
+  if (typeof f.suggestion !== 'string' || a.snapped) return undefined;
+  const exact = a.line === f.line_end
+    && (f.line_start === f.line_end ? a.start_line === undefined : a.start_line === f.line_start);
+  return exact ? f.suggestion : undefined;
 }
 
 // ============================================================ flow
@@ -329,7 +414,8 @@ export async function main(argv) {
 
   try {
     fs.mkdirSync(outDir, { recursive: true });
-    const diff = text('git', ['-C', worktree, 'diff', '--no-ext-diff', '--no-textconv', '--no-color', `${baseRef}${pr.emptyBase ? '..' : '...'}HEAD`]);
+    const range = `${baseRef}${pr.emptyBase ? '..' : '...'}HEAD`;
+    const diff = text('git', ['-C', worktree, 'diff', '--no-ext-diff', '--no-textconv', '--no-color', range]);
     if (!diff.trim()) throw new Error('empty diff, nothing to review');
     const secretHits = scanDiffForSecrets(diff);
     if (secretHits.length) {
@@ -349,7 +435,10 @@ export async function main(argv) {
     try { fs.mkdirSync(inputDir); } catch (e) { throw new Error(e.code === 'EEXIST' ? 'the reviewed tree contains .debate-review; refusing to write review inputs over it' : e.message); }
     fs.writeFileSync(path.join(inputDir, 'diff.patch'), diff, { flag: 'wx' });
     fs.writeFileSync(path.join(inputDir, 'commits.txt'), commits, { flag: 'wx' });
-    const standards = writeStandards(worktree, inputDir, findStandards(worktree, baseRef));
+    const changed = run('git', ['-C', worktree, 'diff', '--name-only', '-z', '--no-renames', range]).stdout.split('\0').filter(Boolean);
+    const standards = writeStandards(worktree, inputDir, findStandards(worktree, baseRef, changed));
+    runLog.warnings = [];
+    const warn = (list) => { for (const w of list) { log(w); runLog.warnings.push(w); } };
 
     const who = {
       main: resolveRole('main', { explicit: opts.main, lane: opts.mainLane, cwd: repoDirForRoles }),
@@ -378,6 +467,7 @@ export async function main(argv) {
     const mainRun = send('main', who.main, mainBrief);
     const findings = validateFindings(extractJson(mainRun.text));
     findings.findings = findings.findings.filter(f => (f.confidence ?? 1) >= opts.minConfidence);
+    warn(coerceEfficiency(findings, 'main'));
     runLog.stages.main = { seconds: mainRun.seconds, doc: findings };
     save();
     log(`main: ${findings.findings.length} finding(s) after the confidence filter`);
@@ -389,6 +479,7 @@ export async function main(argv) {
     const debateRun = send('debate', who.debate, debateBrief);
     const debate = validateDebate(extractJson(debateRun.text), findings);
     debate.new_findings = debate.new_findings.filter(f => (f.confidence ?? 1) >= opts.minConfidence);
+    warn(coerceEfficiency(debate, 'debate'));
     runLog.stages.debate = { seconds: debateRun.seconds, doc: debate };
     save();
     log(`debate: ${debate.verdicts.length} verdict(s), ${debate.new_findings.length} new finding(s) after the confidence filter`);
@@ -410,11 +501,10 @@ export async function main(argv) {
       });
       const finalRun = send('final', who.main, finalBrief);
       finalDoc = validateFinal(extractJson(finalRun.text), findings, debate);
+      warn(finalizeFindings(finalDoc, findings, debate));
       runLog.stages.final = { seconds: finalRun.seconds, doc: finalDoc };
     }
     finalDoc.head = pr.head;
-    const axisOf = new Map([...findings.findings, ...debate.new_findings].map(f => [f.id, f.axis]));
-    for (const f of finalDoc.findings || []) if (!f.axis) f.axis = axisOf.get(f.id);
     save();
 
     const toPost = (finalDoc.findings || []).filter(f =>
@@ -425,7 +515,7 @@ export async function main(argv) {
     for (const f of toPost) {
       const a = anchor(lineMap, f);
       if (!a) { unanchored.push(f); continue; }
-      let body = renderInline(f);
+      let body = renderInline(f, gateSuggestion(a, f));
       if (a.snapped) body += `\n_(anchored to the nearest diff line; the finding named ${f.line_start}-${f.line_end})_\n`;
       comments.push({ ...a, body, claim: f.claim });
     }

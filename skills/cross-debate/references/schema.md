@@ -22,10 +22,11 @@ reorder them or add a `##` heading above section 3.
       "line_start": 42,
       "line_end": 48,
       "severity": "blocking | non-blocking",
-      "axis": "correctness | security | spec | standards | tests | docs",
+      "axis": "correctness | security | spec | standards | tests | docs | efficiency",
       "claim": "what is wrong, one sentence",
       "evidence": "why: the code path, the quoted line, the spec line",
       "recommendation": "concrete change",
+      "suggestion": "optional: exact replacement text for line_start..line_end",
       "confidence": 0.0
     }
   ]
@@ -39,6 +40,12 @@ reorder them or add a `##` heading above section 3.
 - `severity` follows babysit-pr. Blocking means it ships a defect, a security or data exposure, a spec
   violation, a migration hazard, or a failing check. Everything else is non-blocking.
 - `confidence` is 0 to 1. Findings under `min_confidence` (default 0.5) are dropped before debate.
+- `efficiency` findings are always non-blocking. The script turns a blocking one non-blocking, drops one
+  from the debate reviewer's `new_findings`, and records a warning in the run log.
+- `suggestion` is optional and must be a string. It is posted as a GitHub suggestion only when the final
+  ruling is `agreed`, the debate reviewer confirmed the finding (or it is a `D*`), the final stage kept
+  the same file and lines without vetoing it (`"suggestion": null`), and the inline anchor covers exactly
+  those lines. A debate `confirm` vouches for the replacement too. The final stage never supplies one.
 
 ## 2. `debate-review.debate.v1`, debate reviewer to script
 

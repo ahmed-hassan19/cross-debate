@@ -362,7 +362,10 @@ export function joinBackendFindings(backendRun, roundNo) {
     if (!d) return { error: `finding ${f.id} has no final disposition` };
     if (!['agreed', 'contested', 'withdrawn'].includes(d.status)) return { error: `finding ${f.id} has status ${d.status}` };
     const v = verdicts.get(f.id);
-    findings.push({ id: `R${roundNo}:${f.id}`, backendId: f.id, lane: f.lane, status: d.status, severity: d.severity || f.severity, axis: f.axis ?? d.axis ?? null, file: f.file, line_start: f.line_start, line_end: f.line_end, claim: f.claim, evidence: f.evidence ?? '', recommendation: f.recommendation ?? d.recommendation ?? '', confidence: typeof f.confidence === 'number' ? f.confidence : null, debateVerdict: v ? v.verdict : null, debateReason: v ? v.reason : null, debateNote: d.debate_note ?? null, finalClaim: d.claim ?? null });
+    const axis = f.axis ?? d.axis ?? null;
+    // Efficiency is advisory: never let it block a candidate, even from a run log written before the coercion existed.
+    const severity = axis === 'efficiency' ? 'non-blocking' : (d.severity || f.severity);
+    findings.push({ id: `R${roundNo}:${f.id}`, backendId: f.id, lane: f.lane, status: d.status, severity, axis, file: f.file, line_start: f.line_start, line_end: f.line_end, claim: f.claim, evidence: f.evidence ?? '', recommendation: f.recommendation ?? d.recommendation ?? '', confidence: typeof f.confidence === 'number' ? f.confidence : null, debateVerdict: v ? v.verdict : null, debateReason: v ? v.reason : null, debateNote: d.debate_note ?? null, finalClaim: d.claim ?? null });
   }
   for (const id of dispositions.keys()) if (!all.some(f => f.id === id)) return { error: `final disposition ${id} has no source finding` };
   return { findings, summary: finalDoc.summary || main.summary || '' };
