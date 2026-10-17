@@ -22,9 +22,9 @@ test('main keeps PR and Spec context while substitution preserves literal input'
 for (const role of ['debate', 'final']) {
   test(`${role} receives code references and arguments without unrelated context`, () => {
     const brief = buildBrief(role, input);
-    for (const field of ['BASE', 'HEAD', 'FINDINGS_JSON']) assert.ok(brief.includes(input[field]));
+    for (const field of ['BASE', 'HEAD', 'STANDARDS', 'FINDINGS_JSON']) assert.ok(brief.includes(input[field]));
     if (role === 'final') assert.ok(brief.includes(input.DEBATE_JSON));
-    for (const field of ['PR_TITLE', 'PR_BODY', 'SPEC', 'STANDARDS', 'TELEMETRY', 'REVIEWER']) {
+    for (const field of ['PR_TITLE', 'PR_BODY', 'SPEC', 'TELEMETRY', 'REVIEWER']) {
       assert.ok(!brief.includes(input[field]), `${field} must not reach ${role}`);
     }
     assert.ok(brief.includes(`debate-review.${role}.v1`));
@@ -32,7 +32,8 @@ for (const role of ['debate', 'final']) {
 }
 
 test('role input contracts reject missing required arguments', () => {
-  assert.throws(() => buildBrief('debate', { BASE: 'base', HEAD: 'head' }), /missing FINDINGS_JSON/);
+  assert.throws(() => buildBrief('debate', { BASE: 'base', HEAD: 'head', STANDARDS: 'none' }), /missing FINDINGS_JSON/);
+  assert.throws(() => buildBrief('final', { BASE: 'base', HEAD: 'head', FINDINGS_JSON: '{}', DEBATE_JSON: '{}' }), /missing STANDARDS/);
   assert.throws(() => buildBrief('unknown', input), /unknown review brief role/);
 });
 

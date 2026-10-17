@@ -183,20 +183,70 @@ function removeWorktree(clone, dir) {
 
 // ============================================================ briefs
 
-/** Files that document how code should be written in this repo (the Standards axis). */
-function findStandards(worktree) {
-  const candidates = ['CONTRIBUTING.md', 'CODING_STANDARDS.md', 'CLAUDE.md', 'AGENTS.md', '.github/PULL_REQUEST_TEMPLATE.md', 'docs/agents'];
-  const found = [];
-  for (const rel of candidates) {
-    const abs = path.join(worktree, rel);
-    if (!fs.existsSync(abs)) continue;
-    if (fs.statSync(abs).isDirectory()) {
-      for (const f of fs.readdirSync(abs)) found.push(path.join(rel, f));
-    } else {
-      found.push(rel);
+/**
+ * Instruction files reviewer CLIs load on their own (Claude: CLAUDE.md; Codex and OpenCode: AGENTS.md), at any depth.
+ * Lowercase: matching ignores case, because on a case-insensitive filesystem `claude.md` answers an open of `CLAUDE.md`.
+ */
+export const INSTRUCTION_FILES = new Set(['claude.md', 'claude.local.md', 'agents.md', 'agents.override.md']);
+
+/**
+ * Delete tracked instruction files from the checkout, so a reviewed change cannot instruct its own reviewers.
+ * Their head versions stay reviewable in the diff. Returns the removed paths.
+ */
+export function quarantineInstructions(worktree) {
+  const tracked = run('git', ['-C', worktree, 'ls-files', '-z']).stdout.split('\0').filter(Boolean);
+  const removed = tracked.filter(rel => INSTRUCTION_FILES.has(path.posix.basename(rel).toLowerCase())
+    && !throughSymlink(worktree, rel));
+  for (const rel of removed) fs.rmSync(path.join(worktree, rel), { force: true });
+  return removed;
+}
+
+/** True when a parent directory of `rel` is a symlink, so a delete there would land outside the checkout. */
+function throughSymlink(worktree, rel) {
+  const parts = rel.split('/').slice(0, -1);
+  for (let i = 1; i <= parts.length; i++) {
+    try {
+      if (fs.lstatSync(path.join(worktree, ...parts.slice(0, i))).isSymbolicLink()) return true;
+    } catch (e) {
+      if (e.code === 'ENOENT' || e.code === 'ENOTDIR') return false;
+      throw e;
     }
   }
-  return found.length ? found.join(', ') : 'none found, skip the Standards axis';
+  return false;
+}
+
+/** Files that document how code should be written in this repo (the Standards axis). */
+const STANDARDS = ['CONTRIBUTING.md', 'CODING_STANDARDS.md', 'CLAUDE.md', 'AGENTS.md', '.github/PULL_REQUEST_TEMPLATE.md', 'docs/agents'];
+const STANDARDS_MAX_BYTES = 100 * 1024;
+
+/**
+ * Standards as of the base commit, never the head: a change must not rewrite the rules it is judged by.
+ * Regular-file blobs only, so symlinks (mode 120000) and submodules are never followed.
+ */
+export function findStandards(worktree, baseRef) {
+  const listing = run('git', ['-C', worktree, 'ls-tree', '-r', '-l', '-z', baseRef, '--', ...STANDARDS]).stdout;
+  const entries = [];
+  for (const record of listing.split('\0').filter(Boolean)) {
+    const tab = record.indexOf('\t');
+    const [mode, type, oid, size] = record.slice(0, tab).split(/ +/);
+    if (type !== 'blob' || (mode !== '100644' && mode !== '100755')) continue;
+    if (Number(size) > STANDARDS_MAX_BYTES) continue;
+    entries.push({ path: record.slice(tab + 1), oid });
+  }
+  return entries;
+}
+
+/** Write base copies under `.debate-review/standards/` with a `.txt` suffix, so no CLI loads them as instructions. */
+export function writeStandards(worktree, inputDir, entries) {
+  const listed = [];
+  for (const entry of entries) {
+    const rel = path.posix.join('standards', `${entry.path}.txt`);
+    const dest = path.join(inputDir, rel);
+    fs.mkdirSync(path.dirname(dest), { recursive: true });
+    fs.writeFileSync(dest, run('git', ['-C', worktree, 'cat-file', 'blob', entry.oid], { encoding: 'buffer' }).stdout, { flag: 'wx' });
+    listed.push(`\`.debate-review/${rel}\` (base copy of \`${entry.path}\`)`);
+  }
+  return listed.length ? listed.join(', ') : 'none found at the base commit, skip the Standards axis';
 }
 
 // ============================================================ flow
@@ -291,12 +341,14 @@ export async function main(argv) {
     // The worktree is this command's disposable checkout of possibly untrusted code. Agent configuration in it would
     // run when a reviewer starts (a headless Claude session loads project hooks), so it is removed first.
     for (const name of AGENT_CONFIG) fs.rmSync(path.join(worktree, name), { recursive: true, force: true });
+    runLog.quarantined = quarantineInstructions(worktree);
     // Read-only relays may not run git (the Claude relay allows only Read/Glob/Grep), so hand them the diff as files.
     // Exclusive creation: a checkout-provided .debate-review entry or symlink must not redirect these writes.
     const inputDir = path.join(worktree, '.debate-review');
     try { fs.mkdirSync(inputDir); } catch (e) { throw new Error(e.code === 'EEXIST' ? 'the reviewed tree contains .debate-review; refusing to write review inputs over it' : e.message); }
     fs.writeFileSync(path.join(inputDir, 'diff.patch'), diff, { flag: 'wx' });
     fs.writeFileSync(path.join(inputDir, 'commits.txt'), commits, { flag: 'wx' });
+    const standards = writeStandards(worktree, inputDir, findStandards(worktree, baseRef));
 
     const who = {
       main: resolveRole('main', { explicit: opts.main, lane: opts.mainLane, cwd: repoDirForRoles }),
@@ -308,6 +360,7 @@ export async function main(argv) {
     const common = {
       BASE: baseRef,
       HEAD: pr.head,
+      STANDARDS: standards,
     };
     const send = (role, implementer, brief) => dispatch({
       role, who: implementer, brief, cwd: worktree, outDir, timeout: opts.timeout,
@@ -320,7 +373,6 @@ export async function main(argv) {
       PR_TITLE: pr.title,
       PR_BODY: pr.body.slice(0, 6000) || '(empty)',
       SPEC: spec,
-      STANDARDS: findStandards(worktree),
     });
     const mainRun = send('main', who.main, mainBrief);
     const findings = validateFindings(extractJson(mainRun.text));

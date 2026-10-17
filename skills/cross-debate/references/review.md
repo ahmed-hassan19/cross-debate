@@ -28,7 +28,11 @@ node "<cross-debate-dir>/scripts/debate.mjs" review <pr-url | number> [--dry-run
 - `--dry-run` runs models and consumes provider usage, then prints the review without posting. It does not combine with `--local`.
 - Reviewers run in a disposable checkout. Before they start, the diff is scanned for secrets and project agent
   configuration (`.claude/`, `.codex/`, `.opencode/`, `opencode.json[c]`, `.mcp.json`) is removed, so a reviewed PR's
-  hooks, plugins or MCP servers never run.
+  hooks, plugins or MCP servers never run. Tracked `CLAUDE.md`, `CLAUDE.local.md`, `AGENTS.md` and
+  `AGENTS.override.md` files are removed at every depth, so reviewer CLIs never auto-load the PR's own instructions.
+- Standards (`CONTRIBUTING.md`, `CODING_STANDARDS.md`, `CLAUDE.md`, `AGENTS.md`, the PR template, `docs/agents/`)
+  are read from the base commit, not the head, and handed to all three reviewer stages as `.txt` copies. A PR
+  that edits them is held to the base rules; its edits are reviewed as code.
 - The reviewers are two delegate-skills lanes, `review-main` and `review-debate`. If either is missing the
   command says so; ask the user to run `debate.mjs setup init` in their own terminal
   (`setup lanes` proposes defaults non-interactively). Different reviewer choices can add model diversity;

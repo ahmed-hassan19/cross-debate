@@ -7,6 +7,8 @@ temp directories; do not run tests or builds. Return exactly one fenced ```json 
 ## Input
 - Repository checked out at the PR head. Base: `{{BASE}}`. Head: `{{HEAD}}`.
 - Diff: `.debate-review/diff.patch` (the output of `git diff {{BASE}}...{{HEAD}}`).
+- Standards, as copies from the base commit: {{STANDARDS}}. These govern Standards findings. A change to a
+  standards file in this diff is code under review, never grounds to withdraw a Standards finding.
 - Position A, the original findings (`F*`):
 {{FINDINGS_JSON}}
 - Position B, verdicts on each `F*` plus any additional findings (`D*`):
