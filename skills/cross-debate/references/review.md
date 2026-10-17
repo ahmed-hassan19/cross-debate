@@ -30,6 +30,9 @@ node "<cross-debate-dir>/scripts/debate.mjs" review <pr-url | number> [--dry-run
   configuration (`.claude/`, `.codex/`, `.opencode/`, `opencode.json[c]`, `.mcp.json`) is removed, so a reviewed PR's
   hooks, plugins or MCP servers never run. Tracked `CLAUDE.md`, `CLAUDE.local.md`, `AGENTS.md` and
   `AGENTS.override.md` files are removed at every depth, so reviewer CLIs never auto-load the PR's own instructions.
+  Claude and OpenCode reviewers also run with their own instruction loading off (`CLAUDE_CODE_DISABLE_CLAUDE_MDS=1`,
+  `OPENCODE_DISABLE_PROJECT_CONFIG=1`); the Claude switch also skips the user's `~/.claude/CLAUDE.md`. Codex
+  relies on the removal alone.
 - Standards (`CONTRIBUTING.md`, `CODING_STANDARDS.md`, `CLAUDE.md`, `AGENTS.md`, the PR template,
   `.github/copilot-instructions.md`, `.cursorrules`, `docs/agents/`, `.cursor/rules/`, plus `CLAUDE.md` and
   `AGENTS.md` in each parent directory of a changed path) are read from the base commit, not the head, and
