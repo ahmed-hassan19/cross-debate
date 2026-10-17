@@ -1,6 +1,6 @@
 {
   "name": "cross-debate",
-  "version": "0.3.2",
+  "version": "0.4.0",
   "description": "Cross-agent review for plans, code, and pull requests.",
   "type": "module",
   "license": "MIT",
