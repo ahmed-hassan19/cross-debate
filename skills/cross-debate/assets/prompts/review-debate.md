@@ -27,17 +27,24 @@ highest bar.
   but unverified state (a race, nil on a rare but reachable path, a cold cache, an absent optional
   field) when the finding was written as always-on or blocking.
 - `confirm` when you traced the path yourself and it holds. Realistic runtime state you cannot disprove
-  from the code is not grounds to refute.
+  from the code is not grounds to refute. On a finding that carries a `suggestion`, `confirm` also means
+  the replacement text is correct as written; if the defect is real but the replacement is wrong, use
+  `downgrade` and say why.
 
 Do not refute a finding for being speculative or "dependent on runtime state" when that state is
 realistic. Re-read the code. Do not treat the finding's quoted evidence as proof that the line says
 what it claims.
 
+An `efficiency` finding is judged on whether the cost it names is real on the path it names. "No
+observable effect" applies only when that cost is absent.
+
 Then attack the change where the first pass did not look. `new_findings` is a gap sweep, not a second
 review. Add one only when it is `blocking`, you can name the trigger and the wrong result, and it is
 one of: auth or trust boundaries, data loss or duplication, idempotency or partial failure, races and
 ordering, schema drift or migrations. Do not relabel a non-blocking issue as blocking to get it
-through. Zero new findings is the expected outcome on most PRs. Do not pad.
+through. Zero new findings is the expected outcome on most PRs. Do not pad. First passes tend to miss
+moved or extracted code that dropped a guard or anchor, a lock scope that shrank, and a config default
+that flipped. Those are places to look, not new categories: a finding there still has to fit one above.
 
 ## Bar
 - Every verdict and every new finding carries evidence: `file:line` or quoted code. Where a grep

@@ -58,12 +58,12 @@ test('quarantine removes tracked instruction files at every depth, in any case o
 
 test('standards come from the base commit, skip symlinks, and are written as .txt copies', () => {
   const { dir, base } = repo('standards');
-  const entries = findStandards(dir, base);
-  assert.deepEqual(entries.map(e => e.path).sort(), ['CLAUDE.md', 'CONTRIBUTING.md', 'docs/agents/style.md']);
+  const found = findStandards(dir, base);
+  assert.deepEqual(found.entries.map(e => e.path).sort(), ['CLAUDE.md', 'CONTRIBUTING.md', 'docs/agents/style.md']);
 
   const inputDir = path.join(dir, '.debate-review');
   fs.mkdirSync(inputDir);
-  const listed = writeStandards(dir, inputDir, entries);
+  const listed = writeStandards(dir, inputDir, found);
   assert.equal(fs.readFileSync(path.join(inputDir, 'standards/CLAUDE.md.txt'), 'utf8'), 'base rule: never log tokens\n');
   assert.ok(fs.existsSync(path.join(inputDir, 'standards/docs/agents/style.md.txt')));
   assert.ok(!fs.existsSync(path.join(inputDir, 'standards/CLAUDE.md')), 'copies must not keep an auto-loaded name');
@@ -77,13 +77,13 @@ test('oversized standards are skipped and an empty base yields none', () => {
   git(dir, 'add', '-A');
   git(dir, 'commit', '-q', '-m', 'chore: big');
   const big = git(dir, 'rev-parse', 'HEAD');
-  assert.ok(!findStandards(dir, big).some(e => e.path === 'CODING_STANDARDS.md'));
+  assert.ok(!findStandards(dir, big).entries.some(e => e.path === 'CODING_STANDARDS.md'));
 
   const emptyTree = git(dir, 'hash-object', '-t', 'tree', '/dev/null');
-  assert.deepEqual(findStandards(dir, emptyTree), []);
+  assert.deepEqual(findStandards(dir, emptyTree), { entries: [], omitted: 0 });
   const inputDir = path.join(dir, '.debate-review');
   fs.mkdirSync(inputDir);
-  assert.equal(writeStandards(dir, inputDir, []), 'none found at the base commit, skip the Standards axis');
+  assert.equal(writeStandards(dir, inputDir, { entries: [], omitted: 0 }), 'none found at the base commit, skip the Standards axis');
 });
 
 test('quarantine never deletes through a symlinked parent directory', () => {
@@ -95,6 +95,58 @@ test('quarantine never deletes through a symlinked parent directory', () => {
   const removed = quarantineInstructions(dir);
   assert.ok(!removed.some(rel => rel.startsWith('src/')));
   assert.ok(fs.existsSync(path.join(outside, 'CLAUDE.md')), 'file outside the checkout must survive');
+});
+
+/** Base commit with nested standards; returns the base sha. */
+function nestedRepo(name) {
+  const dir = path.join(SCRATCH, name);
+  fs.mkdirSync(dir);
+  git(dir, 'init', '-q', '-b', 'main');
+  write(dir, 'CLAUDE.md', 'root\n');
+  write(dir, 'src/api/CLAUDE.md', 'api rule\n');
+  write(dir, 'src/api/handler.js', 'one\n');
+  write(dir, 'src/api/gone/x.js', 'x\n');
+  write(dir, 'src/api/old.js', 'old\n');
+  write(dir, 'src/api/blob.bin', Buffer.from([0, 1, 2, 3]));
+  write(dir, 'web/AGENTS.md', 'web rule\n');
+  write(dir, 'web/page.js', 'page\n');
+  git(dir, 'add', '-A');
+  git(dir, 'commit', '-q', '-m', 'chore: base');
+  return { dir, base: git(dir, 'rev-parse', 'HEAD') };
+}
+
+test('nested standards come from ancestors of changed paths, with scope, including deletions and renames', () => {
+  const { dir, base } = nestedRepo('nested');
+  for (const changed of [['src/api/handler.js'], ['src/api/gone/x.js'], ['src/api/old.js', 'src/new.js'], ['src/api/blob.bin']]) {
+    const { entries } = findStandards(dir, base, changed);
+    assert.deepEqual(entries.map(e => [e.path, e.scope]), [['CLAUDE.md', null], ['src/api/CLAUDE.md', 'src/api/**']], changed.join());
+  }
+  // A fully deleted directory still exists at the base, so its ancestors' standards are found.
+  fs.rmSync(path.join(dir, 'src'), { recursive: true });
+  assert.ok(findStandards(dir, base, ['src/api/gone/x.js']).entries.some(e => e.path === 'src/api/CLAUDE.md'));
+  // Unrelated directories contribute nothing.
+  assert.ok(!findStandards(dir, base, ['src/api/handler.js']).entries.some(e => e.path === 'web/AGENTS.md'));
+});
+
+test('the cap keeps root and nearest nested standards and reports what it dropped', () => {
+  const { dir } = nestedRepo('cap');
+  for (let i = 0; i < 25; i++) write(dir, `.cursor/rules/r${String(i).padStart(2, '0')}.mdc`, `rule ${i}\n`);
+  git(dir, 'add', '-A');
+  git(dir, 'commit', '-q', '-m', 'chore: rules');
+  const found = findStandards(dir, git(dir, 'rev-parse', 'HEAD'), ['src/api/handler.js']);
+  assert.equal(found.entries.length, 20);
+  assert.equal(found.omitted, 7);
+  assert.deepEqual(found.entries.slice(0, 2).map(e => e.path), ['CLAUDE.md', 'src/api/CLAUDE.md']);
+  const inputDir = path.join(dir, '.debate-review');
+  fs.mkdirSync(inputDir);
+  const listed = writeStandards(dir, inputDir, found);
+  assert.match(listed, /applies to `src\/api\/\*\*`/);
+  assert.match(listed, /7 more standards file\(s\) omitted by the 20-file cap/);
+});
+
+test('glob characters in a changed path never widen the standards listing', () => {
+  const { dir, base } = nestedRepo('literal');
+  assert.deepEqual(findStandards(dir, base, ['*/x.js']).entries.map(e => e.path), ['CLAUDE.md']);
 });
 
 function isLink(p) {

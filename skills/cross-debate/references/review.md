@@ -30,9 +30,14 @@ node "<cross-debate-dir>/scripts/debate.mjs" review <pr-url | number> [--dry-run
   configuration (`.claude/`, `.codex/`, `.opencode/`, `opencode.json[c]`, `.mcp.json`) is removed, so a reviewed PR's
   hooks, plugins or MCP servers never run. Tracked `CLAUDE.md`, `CLAUDE.local.md`, `AGENTS.md` and
   `AGENTS.override.md` files are removed at every depth, so reviewer CLIs never auto-load the PR's own instructions.
-- Standards (`CONTRIBUTING.md`, `CODING_STANDARDS.md`, `CLAUDE.md`, `AGENTS.md`, the PR template, `docs/agents/`)
-  are read from the base commit, not the head, and handed to all three reviewer stages as `.txt` copies. A PR
-  that edits them is held to the base rules; its edits are reviewed as code.
+- Standards (`CONTRIBUTING.md`, `CODING_STANDARDS.md`, `CLAUDE.md`, `AGENTS.md`, the PR template,
+  `.github/copilot-instructions.md`, `.cursorrules`, `docs/agents/`, `.cursor/rules/`, plus `CLAUDE.md` and
+  `AGENTS.md` in each parent directory of a changed path) are read from the base commit, not the head, and
+  handed to all three reviewer stages as `.txt` copies. A nested file applies only at or below its directory.
+  At most 20 are listed (root files first, then the nearest nested ones); the brief says how many were cut.
+  A PR that edits them is held to the base rules; its edits are reviewed as code.
+- Efficiency findings are advisory and never block. Findings may carry a one-click GitHub `suggestion` when
+  both reviewers stand behind the exact fix ([comment format](comment-format.md)).
 - The reviewers are two delegate-skills lanes, `review-main` and `review-debate`. If either is missing the
   command says so; ask the user to run `debate.mjs setup init` in their own terminal
   (`setup lanes` proposes defaults non-interactively). Different reviewer choices can add model diversity;

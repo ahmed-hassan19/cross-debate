@@ -32,6 +32,8 @@ temp directories; do not run tests or builds. Return exactly one fenced ```json 
   - Restates an `F*` at the same location for the same failure: `withdrawn` with `debate_note`
     "duplicate of F<n>". Keep the `F*`.
 - Carry every finding through with its final `status`. Drop nothing silently.
+- Never write a `suggestion`. If an original finding carries one and your ruling changes the fix, set
+  `"suggestion": null` on that entry so the outdated replacement is not posted.
 - `claim`, `evidence`, `recommendation`, `debate_note`, and `summary` are posted on the PR for a
   reader who never saw this exchange. Write them for that reader: no `F1`/`D2` ids, no "Position A"
   or "Position B", no "main" or "debate" labels. Say "the second pass" or "the challenge" if you must

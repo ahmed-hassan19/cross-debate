@@ -34,7 +34,7 @@ GitHub renders those alert blockquotes with colour; anything else shows a plain 
 
 ## Inline comment
 
-```
+````
 <!-- debate-review:<id> status=<agreed|contested> severity=<blocking|non-blocking> level=<P0|P1|P2> -->
 > [!CAUTION | WARNING | NOTE]
 > **<level>, agreed by both reviewers.** <claim>
@@ -43,11 +43,19 @@ GitHub renders those alert blockquotes with colour; anything else shows a plain 
 
 Suggested: <recommendation>
 
-_<debate_note>_
+```suggestion
+<suggestion, only when gated in>
 ```
+
+_<debate_note>_
+````
 
 A contested finding's first line reads `**<level>, contested. The second reviewer disagreed; the
 main reviewer holds it, reasons below.** <claim>`.
+
+The `suggestion` block appears only on agreed findings that the debate reviewer confirmed (or `D*`
+findings), when the final stage kept the original file and lines and the anchor covers exactly those
+lines. Its fence is longer than any backtick run inside, so the content cannot close it early.
 
 ## Why the HTML markers
 

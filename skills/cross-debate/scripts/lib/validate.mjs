@@ -2,7 +2,7 @@
 // document is never posted as if it were a review.
 
 const SEVERITIES = new Set(['blocking', 'non-blocking']);
-const AXES = new Set(['correctness', 'security', 'spec', 'standards', 'tests', 'docs']);
+const AXES = new Set(['correctness', 'security', 'spec', 'standards', 'tests', 'docs', 'efficiency']);
 const VERDICTS = new Set(['confirm', 'refute', 'downgrade']);
 const STATUSES = new Set(['agreed', 'contested', 'withdrawn']);
 
@@ -34,6 +34,7 @@ function checkFinding(role, f, index, { idPrefix, needStatus }) {
     if (f.confidence !== undefined && !(typeof f.confidence === 'number' && f.confidence >= 0 && f.confidence <= 1)) {
       throw problem(role, `${where} confidence must be a number in 0..1`);
     }
+    if (f.suggestion !== undefined && typeof f.suggestion !== 'string') throw problem(role, `${where} suggestion must be a string`);
   }
 }
 
