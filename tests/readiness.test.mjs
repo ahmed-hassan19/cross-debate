@@ -158,3 +158,15 @@ process.stdin.on('data', chunk => {
   assert.ok(result.stdout.includes(`! codex hook trust: ${entries.file}:0 (untrusted); rerun the installer or run /hooks in Codex`), result.stdout);
   assert.equal(fs.existsSync(path.join(home, 'unexpected-call')), false, 'doctor must stay read-only');
 });
+
+test('readiness and pairing use the second plan seat override', async () => {
+  const config = fleet('claude');
+  config.lanes['plan-debate-codex'] = { implementer: 'codex', model: 'gpt-6-astra', effort: 'xhigh' };
+  write(globalFile, JSON.stringify(config));
+  const ready = await reviewerReadiness(repo, { seats: ['codex'] });
+  assert.ok(ready.checks.some(check => check.lane === 'plan-debate-codex'));
+  assert.ok(!ready.checks.some(check => check.lane === 'plan-debate'));
+  const { seatPairs } = await import('../skills/cross-debate/scripts/setup.mjs');
+  assert.match(seatPairs(ready.lanes, ['codex'])[0], /plan reviewers claude then codex/);
+  assert.ok((await reviewerReadiness(repo, { seats: ['claude'] })).checks.some(check => check.lane === 'plan-debate'));
+});

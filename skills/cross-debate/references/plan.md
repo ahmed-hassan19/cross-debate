@@ -12,7 +12,8 @@ completes, reads the result with `wait --run "<run>" --max-wait 1s`. Every other
 
 1. Draft the complete plan. Claude uses its assigned plan file; other hosts may pass the plan on stdin (`--plan -`).
    Each review attempt runs two serial, independent reviewers: lane `plan-main-<seat>` when configured, else
-   `plan-main`, followed by lane `plan-debate`. Implementers, models, and effort settings come from those fleet
+   `plan-main`, followed by lane `plan-debate-<seat>` when configured, else `plan-debate`.
+   Implementers, models, and effort settings come from those fleet
    lane bindings. Both reports must complete. Their findings and assumptions are combined; secondary finding IDs
    are namespaced automatically, and the combined plan rating is the lower of the two ratings.
    If this is an unchanged, previously finished plan denied after another prompt, use step 8's cheap re-stamp.

@@ -148,7 +148,7 @@ export function proposeLanes(available, existing = {}, { opencodeModel = null } 
 export function seatPairs(lanes, seats) {
   return seats.map(seat => {
     const first = lanes[`${PLAN_LANES.main}-${seat}`] ?? lanes[PLAN_LANES.main];
-    const second = lanes[PLAN_LANES.debate];
+    const second = lanes[`${PLAN_LANES.debate}-${seat}`] ?? lanes[PLAN_LANES.debate];
     const primary = first?.implementer ?? null;
     const secondary = second?.implementer ?? null;
     const repeatsPrimary = secondary && secondary === primary && (second.model ?? null) === (first.model ?? null);
@@ -317,8 +317,8 @@ export async function reviewerReadiness(cwd, { globalConfig, seats = AGENTS } = 
     return { ok: false, lanes: {}, checks: [{ lane: 'configuration', ok: false, error: error.message }] };
   }
   const names = new Set([
-    ...seats.map(seat => Object.hasOwn(config.lanes, `${PLAN_LANES.main}-${seat}`) ? `${PLAN_LANES.main}-${seat}` : PLAN_LANES.main),
-    PLAN_LANES.debate, ...CODE_REVIEW_LANES,
+    ...seats.flatMap(seat => Object.values(PLAN_LANES).map(lane => Object.hasOwn(config.lanes, `${lane}-${seat}`) ? `${lane}-${seat}` : lane)),
+    ...CODE_REVIEW_LANES,
   ]);
   const checks = [...names].map(lane => {
     const entry = config.lanes[lane];

@@ -32,7 +32,7 @@ Usage:
   finish --run <id> [--plan <file|->] [--self-review <report> --reason "user authorized: <quote>"]
   stats [--kind plan|code] [--seat <seat>] [--since 30d] [--json]
 
-The primary reviewer is lane plan-main-<seat> when configured, else plan-main; the second is plan-debate.
+Each plan lane uses its <lane>-<seat> override when configured, else plan-main or plan-debate.
 
 Environment: DEBATE_HOME (default ~/.local/share/debate). --help never launches a model.
 `;
@@ -84,10 +84,10 @@ export function reviewDoc(run, extra = {}) {
 
 // ---------- preflight ----------
 
-/** plan-main-<seat> when that lane exists, else plan-main; the chosen lane then resolves strictly. */
+/** Seat-specific lanes win by presence; each chosen lane then resolves strictly. */
 export function planLanes(seat, cwd) {
-  const seatLane = `${PLAN_LANES.main}-${seat}`;
-  return [Object.hasOwn(loadLaneConfig(cwd).lanes, seatLane) ? seatLane : PLAN_LANES.main, PLAN_LANES.debate];
+  const { lanes } = loadLaneConfig(cwd);
+  return Object.values(PLAN_LANES).map(lane => Object.hasOwn(lanes, `${lane}-${seat}`) ? `${lane}-${seat}` : lane);
 }
 export function planPreflight(seat, cwd, override = null) {
   if (!SEATS.includes(seat)) return { ok: false, reason: `unsupported seat ${seat}` };

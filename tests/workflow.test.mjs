@@ -2492,3 +2492,32 @@ test('authorized waiver abandons an unchanged base without a receipt, but refuse
   assert.equal(cli('scope', ['disable', '--cwd', repo]).status, 0);
   assert.equal(cli('code', ['begin', '--seat', 'codex', '--session', 'next-task', '--cwd', repo]).json.ok, true);
 });
+
+test('both plan passes honor seat overrides without changing other seats or masking invalid overrides', () => {
+  const repo = makeRepo();
+  const fleetFile = path.join(XDG, 'delegate-skills', 'config.json');
+  const original = fs.readFileSync(fleetFile, 'utf8');
+  try {
+    const fleet = JSON.parse(original);
+    fleet.lanes['plan-main-codex'] = { implementer: 'claude', model: 'claude-fable-5-1', effort: 'xhigh' };
+    fleet.lanes['plan-debate-codex'] = { implementer: 'codex', model: 'gpt-6-astra', effort: 'xhigh' };
+    fs.writeFileSync(fleetFile, JSON.stringify(fleet));
+    assert.deepEqual(plan.planLanes('codex', repo), ['plan-main-codex', 'plan-debate-codex']);
+    assert.deepEqual(plan.planLanes('claude', repo), ['plan-main-claude', 'plan-debate']);
+    const selected = plan.planPreflight('codex', repo);
+    assert.equal(selected.ok, true, selected.reason);
+    assert.deepEqual(selected.reviewers.map(r => [r.lane, r.model, r.effort]), [
+      ['plan-main-codex', 'claude-fable-5-1', 'xhigh'],
+      ['plan-debate-codex', 'gpt-6-astra', 'xhigh'],
+    ]);
+    fs.mkdirSync(path.join(repo, '.delegate'));
+    fs.writeFileSync(path.join(repo, '.delegate', 'config.json'), JSON.stringify({
+      version: 'delegate-fleet.v1', lanes: { 'plan-debate-codex': { implementer: 'claude' } },
+    }));
+    const untrusted = plan.planPreflight('codex', repo);
+    assert.equal(untrusted.ok, false);
+    assert.match(untrusted.reason, /secondary-1 reviewer preflight: .*configuration trust/);
+  } finally {
+    fs.writeFileSync(fleetFile, original);
+  }
+});

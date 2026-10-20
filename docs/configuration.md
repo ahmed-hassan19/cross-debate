@@ -14,6 +14,7 @@ then lets you reuse them for the code lanes or choose the code lanes separately.
 | `plan-main` | Challenger | First independent plan-review pass |
 | `plan-main-<seat>` | Challenger | Overrides that first pass for one host |
 | `plan-debate` | Lead reviewer | Second independent plan-review pass |
+| `plan-debate-<seat>` | Lead reviewer | Overrides that second pass for one host |
 | `review-main` | Lead reviewer | Main and final code/PR reviewer |
 | `review-debate` | Challenger | Challenges code/PR findings and can add findings |
 
@@ -46,7 +47,8 @@ node skills/cross-debate/vendor/delegate-skills/delegate-setup/scripts/config.mj
 ## Precedence and project trust
 
 Global lanes load first. `.delegate/config.json` replaces an entire lane of the same name, including omitted
-fields. `plan-main-<seat>` then wins by presence over `plan-main`; an invalid override fails instead of falling back.
+fields. For each plan pass, `<lane>-<seat>` wins by presence over its shared lane (`plan-main` or `plan-debate`);
+an invalid override fails instead of falling back.
 Project plan bindings require explicit trust of that exact file digest. Inspect the project file and use the
 bundled delegate-setup config tool's `write --scope project --cwd <project> <reviewed-file>` in your own terminal
 only after checking all entries; it writes the file and records trust. Later edits invalidate that trust.

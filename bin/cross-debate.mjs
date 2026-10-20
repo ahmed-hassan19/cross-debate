@@ -337,7 +337,10 @@ export async function install(ui = p, cwd = process.cwd()) {
     const config = structuredClone(current);
     const proposed = { 'plan-main': pair[1], 'plan-debate': pair[0], 'review-main': codePair[0], 'review-debate': codePair[1] };
     for (const name of requiredLanes) if (choice === 'custom' || !config.lanes[name]) config.lanes[name] = proposed[name];
-    if (choice === 'custom') for (const name of Object.keys(config.lanes).filter(n => n.startsWith('plan-main-'))) config.lanes[name] = pair[1];
+    if (choice === 'custom') for (const name of Object.keys(config.lanes)) {
+      if (name.startsWith('plan-main-')) config.lanes[name] = pair[1];
+      if (name.startsWith('plan-debate-')) config.lanes[name] = pair[0];
+    }
     const describe = lane => [lane.implementer, lane.model || 'CLI default model', lane.effort || lane.variant].filter(Boolean).join(' / ') + (lane.source === 'project' ? ' (project override)' : '');
     const scope = repositoryScope(cwd);
     const readiness = await reviewerReadiness(cwd, { globalConfig: config, seats: hosts });
@@ -348,7 +351,7 @@ export async function install(ui = p, cwd = process.cwd()) {
     const repeat = (a, b) => a.implementer === b.implementer && a.model === b.model;
     const sameModel = [
       ...(repeat(lanes['review-main'], lanes['review-debate']) ? ['code'] : []),
-      ...hosts.filter(h => repeat(lanes[`plan-main-${h}`] || lanes['plan-main'], lanes['plan-debate'])).map(h => `${labels[h]} plans`),
+      ...hosts.filter(h => repeat(lanes[`plan-main-${h}`] || lanes['plan-main'], lanes[`plan-debate-${h}`] || lanes['plan-debate'])).map(h => `${labels[h]} plans`),
     ];
     const roleLine = role => {
       const code = lanes[role.code], plan = lanes[role.plan];
@@ -358,7 +361,10 @@ export async function install(ui = p, cwd = process.cwd()) {
     ui.note([
       `Hosts: ${hosts.map(h => labels[h]).join(', ')}`,
       ...roles.map(roleLine),
-      ...hosts.filter(h => lanes[`plan-main-${h}`]).map(h => `${labels[h]} plans: first opinion from ${describe(lanes[`plan-main-${h}`])}`),
+      ...hosts.flatMap(h => [
+        ...(lanes[`plan-main-${h}`] ? [`${labels[h]} plans: first opinion from ${describe(lanes[`plan-main-${h}`])}`] : []),
+        ...(lanes[`plan-debate-${h}`] ? [`${labels[h]} plans: second opinion from ${describe(lanes[`plan-debate-${h}`])}`] : []),
+      ]),
       ...(sameModel.length ? [`The Lead reviewer and Challenger use the same model (${sameModel.join(', ')}), so they'll tend to make the same mistakes. Pick different families if you can.`] : []),
       ...(plan.retainedHosts.length ? [`Keeping the legacy debate registration for ${plan.retainedHosts.join(', ')}. Select those hosts on a later run to finish migration.`] : []),
       `Current directory: ${scope.identity ? `${compact(scope.identity.worktreeRoot)} (${scope.warnings.length ? scope.warnings.join('; ') : scope.enabled ? 'automatic reviews on' : 'explicit opt-out'})` : 'not a Git repository; no automatic reviews here'}`,
