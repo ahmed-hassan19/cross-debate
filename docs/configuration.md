@@ -15,6 +15,7 @@ then lets you reuse them for the code lanes or choose the code lanes separately.
 | `plan-main-<seat>` | Challenger | Overrides that first pass for one host |
 | `plan-debate` | Lead reviewer | Second independent plan-review pass |
 | `plan-debate-<seat>` | Lead reviewer | Overrides that second pass for one host |
+| `plan-judge` | Optional advisor | Explicit plan-dispute escalation; shared across hosts |
 | `review-main` | Lead reviewer | Main and final code/PR reviewer |
 | `review-debate` | Challenger | Challenges code/PR findings and can add findings |
 
@@ -66,5 +67,15 @@ Use `setup doctor --agent <host> --cwd <project>` to see effective bindings and 
 | `~/.cache/debate-review/` | Standalone PR/local review artifacts |
 
 `npx --yes cross-debate stats --since 30d` shows local review statistics.
+
+Optional judge binding (merge into the fleet's `lanes` object):
+`"plan-judge": {"implementer":"opencode","model":"agent-platform/google/gemini-4-argon","variant":"high"}`.
+It follows normal global/project precedence and project trust; there are no seat overrides. Missing judge
+settings or CLI produce optional doctor warnings and never gate installation or an un-escalated review.
+Malformed fleet entries still fail the entire configuration. Requested judging checks settings, trust,
+CLI availability and relay read-only support before launch; provider access is verified only by a real call.
+Judge usage is counted once under stage `judge`, with separate attempt/failure counters. OpenCode token
+usage stays unknown; cost and tripwire coverage come from its relay. Served model stays unknown without
+explicit runtime evidence, regardless of the requested model.
 Claude's native permission allowlist matches literal paths; `setup hooks --agent claude` prints entries for
 the invoked catalog path and its resolved path. Workflow details stay in [operations](../skills/cross-debate/references/operations.md).

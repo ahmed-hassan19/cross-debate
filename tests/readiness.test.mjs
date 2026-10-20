@@ -170,3 +170,27 @@ test('readiness and pairing use the second plan seat override', async () => {
   assert.match(seatPairs(ready.lanes, ['codex'])[0], /plan reviewers claude then codex/);
   assert.ok((await reviewerReadiness(repo, { seats: ['claude'] })).checks.some(check => check.lane === 'plan-debate'));
 });
+
+test('optional judge diagnostics warn without changing mandatory readiness or installer gating', async () => {
+  for (const entry of [null, { implementer: 'opencode', model: 'provider/model', variant: 'high' }]) {
+    const config = fleet('claude'); if (entry) config.lanes['plan-judge'] = entry;
+    write(globalFile, JSON.stringify(config));
+    const ready = await reviewerReadiness(repo, { globalConfig: config });
+    assert.equal(ready.ok, true); assert.equal(ready.optionalChecks[0].ok, false);
+    assert.equal(ready.checks.some(c => c.lane === 'plan-judge'), false);
+    const result = doctor('--agent', 'claude');
+    assert.equal(result.status, 0, result.stderr); assert.match(result.stdout, /! optional lane plan-judge:/);
+  }
+  const config = fleet('claude'); config.lanes['plan-judge'] = { implementer: 'opencode' };
+  write(globalFile, JSON.stringify(config));
+  assert.equal((await reviewerReadiness(repo)).ok, false, 'malformed optional entry still invalidates the fleet document');
+});
+
+test('optional judge uses shared lane precedence and project trust', async () => {
+  project({ 'plan-judge': { implementer: 'claude', model: 'project-model' } });
+  let ready = await reviewerReadiness(repo);
+  assert.equal(ready.ok, true); assert.match(ready.optionalChecks[0].error, /project configuration trust/);
+  project({ 'plan-judge': { implementer: 'claude', model: 'project-model' } }, { trust: true });
+  ready = await reviewerReadiness(repo);
+  assert.equal(ready.optionalChecks[0].ok, true); assert.equal(ready.optionalChecks[0].entry.model, 'project-model');
+});

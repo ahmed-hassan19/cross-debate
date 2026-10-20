@@ -13,6 +13,7 @@ import {
 import { resolveReviewOverride } from './lib/recovery.mjs';
 import { discoverModelCatalog, modelMenu } from './lib/model-catalog.mjs';
 import { codexHookStatus } from './lib/codex-hooks.mjs';
+import { judgeReadiness } from './lib/plan-judge.mjs';
 
 const HELP = `debate.mjs setup — configure reviewer lanes and host hooks, then check the install
 
@@ -328,7 +329,7 @@ export async function reviewerReadiness(cwd, { globalConfig, seats = AGENTS } = 
       return { lane, entry, ok: true };
     } catch (error) { return { lane, entry, ok: false, error: error.message }; }
   });
-  return { ok: checks.every(check => check.ok), lanes: config.lanes, checks };
+  return { ok: checks.every(check => check.ok), lanes: config.lanes, checks, optionalChecks: [judgeReadiness(cwd, config)] };
 }
 
 /** Doctor runs from the shared install, but hooks name the host catalog path, so match the path-independent marker. */
@@ -369,7 +370,8 @@ async function doctorCommand(flags) {
   add(available.length ? 'ok' : 'fail', 'reviewer CLIs', available.join(', ') || 'none on PATH');
   const scope = repositoryScope(cwd);
   add(scope.warnings.length ? 'warn' : 'ok', 'automatic reviews', !scope.identity ? 'off: not a Git repository' : scope.warnings.length ? scope.warnings.join('; ') : scope.enabled ? `on: ${scope.configured === null ? 'Git default' : 'explicitly enabled'}${scope.effective ? '' : ' (session off)'}${scope.effective && !scope.gitGate ? ' (git gate off)' : ''}` : 'off: explicit project opt-out');
-  const { lanes, checks } = await reviewerReadiness(cwd, { seats });
+  const { lanes, checks, optionalChecks = [] } = await reviewerReadiness(cwd, { seats });
+  for (const check of optionalChecks) add(check.ok ? 'ok' : 'warn', `optional lane ${check.lane}`, check.ok ? `${check.entry.implementer} ${check.entry.model || '(CLI default model)'} (sign-in/provider unverified)` : check.error);
   for (const { lane, entry, ok, error } of checks) {
     const binding = entry ? `${entry.implementer} ${entry.model || '(CLI default model)'}${entry.effort ? ` effort=${entry.effort}` : ''}${entry.variant ? ` variant=${entry.variant}` : ''} (${entry.source})` : '';
     add(ok ? 'ok' : 'fail', `lane ${lane}`, ok ? binding : [binding, error].filter(Boolean).join(': '));

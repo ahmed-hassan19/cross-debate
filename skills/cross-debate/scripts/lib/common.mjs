@@ -1156,7 +1156,7 @@ export function statsRowFromRun(run) {
   let complete = true;
   let anyAgent = false;
   for (const round of run.rounds || []) {
-    for (const attempt of round.attempts) {
+    for (const attempt of [...round.attempts, ...(round.judge?.attempts || [])]) {
       const list = attempt.agents || (attempt.reviewer ? [{ stage: 'review', ...attempt.reviewer, usage: attempt.usage, cost: attempt.cost, seconds: attempt.seconds, sessionId: attempt.reviewerSessionId, coverage: attempt.coverage }] : []);
       for (const a of list) {
         anyAgent = true;
@@ -1181,6 +1181,9 @@ export function statsRowFromRun(run) {
     claims, assumptions, perRound, agents,
     ...((run.rounds || []).some(r => r.attempts.some(a => a.promptSizes?.length)) ? { promptSizes: run.rounds.flatMap(r => r.attempts.flatMap(a => (a.promptSizes || []).map(size => ({ round: r.round, attempt: a.attempt, ...size })))) } : {}),
     reviewerFailures: failedAttempts, retryUsed: run.retryUsed === true,
+    judgeAttempts: (run.rounds || []).reduce((n, r) => n + (r.judge?.attempts.length || 0), 0),
+    judgeFailures: (run.rounds || []).flatMap(r => r.judge?.attempts || []).filter(a => a.status === 'failed').length,
+    judgeRetryUsed: run.judgeRetryUsed === true,
     orchestratorModel: run.orchestratorModel ?? null, recoveries: run.recoveries ?? [], selfReview: run.selfReview ? { report: run.selfReview.report, snapshot: run.selfReview.snapshot, independent: false } : null,
     tokens: { reviewerKnown: known || {}, complete: anyAgent && complete, orchestrator: run.orchestratorUsage ?? null },
     operations: { baselineEvents: run.operations?.baselineEvents || [], deferrals: run.operations?.deferrals || [], waivers: run.waiver ? [run.waiver] : [], pushApprovals: (run.approvals || []).map(a => ({ approvalId: a.approvalId, remote: a.remote, destinationRef: a.destinationRef, at: a.at, consumedAt: a.consumedAt })) },
@@ -1214,6 +1217,7 @@ export function computeStats(rows, filters = {}) {
     elapsed: { totalSec: durations.reduce((a, b) => a + b, 0), averageSec: ratio(durations.reduce((a, b) => a + b, 0), durations.length) },
     claims: { ...claims, validatedCorrect, validatedWrong: claims.discarded, precision: ratio(validatedCorrect, claims.total), discardRate: ratio(claims.discarded, claims.total), contestReversalRate: ratio(claims.reversed, claims.contested) },
     reviewer: { attempts, failures, failureRate: ratio(failures, attempts) },
+    judge: { attempts: sum(r => r.judgeAttempts), failures: sum(r => r.judgeFailures) },
     ratings: { planMovement, reviewAverage: ratio(reviewRatings.reduce((a, b) => a + b, 0), reviewRatings.length) },
     tokens: { reviewerKnown: tokensKnown, complete: runs.length > 0 && runs.every(r => r.tokens.complete), perAcceptedClaim: typeof tokensKnown.input === 'number' ? ratio(tokensKnown.input, validatedCorrect) : null, orchestratorNonAdditive: true },
     byLane: laneBreakdown(runs),

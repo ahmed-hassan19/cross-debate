@@ -16,6 +16,7 @@ import {
   orchestratorUsageFromTranscript, upsertStatsRow, statsRowFromRun, statsCommand, parseArgs, loadLaneConfig,
 } from './lib/common.mjs';
 import { failReviewAttempt, needsUserDecision, validateResume, authorizeResume, recordSelfReview, requireFinishDecision, resolveReviewOverride, reviewTooling, modelIdentity, orchestratorModel, reviewerLabel } from './lib/recovery.mjs';
+import { prepareJudge, judgeAttempt, judgeDoc, failJudge, setJudgePid, runJudgeAttempt, validateJudgeRulings } from './lib/plan-judge.mjs';
 export const TEMPLATE_PATH = path.join(SKILL_DIR, 'assets', 'review-brief.md');
 const DEFAULT_TIMEOUT = '20m';
 export const ACCEPT_RATING = 8; // acceptance threshold for a valid plan rating
@@ -28,6 +29,9 @@ Usage:
   review --run <id> --retry [--detach]
   resume --run <id> --seat <seat> --session <id> --reason "user authorized: <quote>" [--reviewer-lane <lane>] [--detach]
   wait --run <id> [--max-wait 60s]
+  judge --run <id> --disputes <json-file> [--detach]
+  judge --run <id> --retry [--reason "investigated: <resolution>"] [--detach]
+  judge --run <id> --resume --seat <seat> --session <id> --reason "user authorized: <quote>" [--detach]
   verdict --run <id> --round <n> --plan <file|-> --verdicts <file>
   finish --run <id> [--plan <file|->] [--self-review <report> --reason "user authorized: <quote>"]
   stats [--kind plan|code] [--seat <seat>] [--since 30d] [--json]
@@ -44,7 +48,7 @@ export function newPlanRun({ seat, sessionId, cwd, sourcePath, origin, timeout }
   return {
     schema: RUN_SCHEMA, kind: 'plan', runId: crypto.randomUUID(), seat, sessionId, sessionKey: sessionKey(seat, sessionId), cwd,
     createdAt: now, updatedAt: now, finishedAt: null, status: 'new', stopReason: null, outcome: null, retryUsed: false,
-    timeout, rounds: [], warnings: [], preflight: null,
+    timeout, rounds: [], warnings: [], preflight: null, judgeRetryUsed: false,
     plan: { sourcePath, origin, firstFinishedAt: null, receipt: null, finalBody: null },
   };
 }
@@ -57,9 +61,10 @@ export function reviewDoc(run, extra = {}) {
   const round = currentRound(run);
   const attempt = currentAttempt(round);
   const reviewers = attempt ? (attempt.reviewers || (attempt.reviewer ? [attempt.reviewer] : [])) : [];
+  const judge = judgeDoc(run);
   const doc = {
     ok: true, runId: run.runId, kind: 'plan', seat: run.seat, round: round ? round.round : 0, attempt: attempt ? attempt.attempt : 0,
-    status: attempt ? attempt.status : run.status === 'preflight_failed' ? 'preflight_failed' : run.status,
+    status: ['judging', 'judge_failed'].includes(run.status) ? run.status : attempt ? attempt.status : run.status === 'preflight_failed' ? 'preflight_failed' : run.status,
     runStatus: run.status, stopReason: run.stopReason, retryUsed: run.retryUsed,
     retryAvailable: run.status === 'review_failed' && !run.retryUsed,
     needsUserDecision: needsUserDecision(run), failureDetails: attempt?.failureDetails ?? null,
@@ -72,6 +77,7 @@ export function reviewDoc(run, extra = {}) {
     assumptions: round && round.review ? round.review.assumptions : [],
     contests: round && round.review ? round.review.contests : [],
     reviews: round && round.review ? round.review.reviews || [] : [],
+    ...(judge ? { judge } : {}),
     usage: attempt ? attempt.usage ?? null : null, cost: attempt ? attempt.cost ?? null : null,
     seconds: attempt ? attempt.seconds ?? null : null, coverage: attempt ? attempt.coverage ?? null : null,
     error: attempt && attempt.error ? attempt.error : run.preflight && run.preflight.status === 'failed' ? run.preflight.reason : null,
@@ -129,6 +135,8 @@ export function renderHistory(run, roundNo) {
     verdicts: project(round.verdict?.verdicts, ['id', 'verdict', 'reason', 'evidence', 'change']),
     contests: project(round.review?.contests, ['id', 'stance', 'reason', 'evidence']),
     contest_rulings: project(round.verdict?.contest_rulings, ['id', 'ruling', 'reason', 'evidence']),
+    ...(round.judge ? { judge_recommendations: project(round.judge.report?.recommendations, ['id', 'recommendation', 'rationale', 'evidence']),
+      judge_rulings: project(round.verdict?.judge_rulings, ['id', 'ruling', 'reason', 'evidence']) } : {}),
     assumptions: project(round.review?.assumptions, ['id', 'decision', 'recommended', 'options']),
     resolutions: project(round.verdict?.assumptions, ['id', 'resolution', 'answer', 'changed_plan']),
     missed: project((round.verdict?.missed || []).filter(m => missedDeclaresChange({ missed: [m] })), ['claim', 'evidence', 'change', 'fixed']),
@@ -409,6 +417,19 @@ export function waitForRun(home, runId, maxWaitMs) {
   for (;;) {
     let run = loadRun(home, runId);
     const round = currentRound(run);
+    const judge = judgeAttempt(run);
+    if (run.status === 'judging') {
+      if (!judge || judge.status !== 'running') return run;
+      if (Number.isInteger(judge.pid) && !isPidAlive(judge.pid)) {
+        return updateRun(home, runId, cur => {
+          const at = judgeAttempt(cur);
+          if (cur.status === 'judging' && currentRound(cur).round === round.round && at?.attempt === judge.attempt && at.status === 'running') failJudge(cur, at, 'worker_died', `judge worker pid ${judge.pid} exited without recording a result`);
+          return cur;
+        });
+      }
+      if (Date.now() >= end) return run;
+      sleepMs(1000); continue;
+    }
     const attempt = currentAttempt(round);
     if (!attempt || attempt.status !== 'running') return run;
     if (Number.isInteger(attempt.pid) && !isPidAlive(attempt.pid)) {
@@ -444,6 +465,8 @@ export function applyVerdict(home, runId, roundNo, revisedBody, doc) {
     const round = run.rounds[roundNo - 1];
     if (!round || roundNo !== run.rounds.length) throw usage(`round ${roundNo} is not the current round (${run.rounds.length})`);
     if (!round.review || round.verdict) throw usage(`round ${roundNo} ${round.verdict ? 'already has a verdict' : 'has no completed review'}`);
+    if (round.judge && !round.judge.report) throw usage('judge request is pending; complete judge recovery before verdict');
+    if (round.judge || doc?.judge_rulings !== undefined) validateJudgeRulings(doc?.judge_rulings, round.judge);
     const validation = validateVerdictDoc(doc, { findingIds: round.review.findings.map(f => f.id), contestedIds: round.review.contests.filter(c => c.stance === 'contest').map(c => c.id), assumptionIds: allAssumptionIds(run) });
     if (!validation.ok) throw usage('invalid verdict file', validation.errors);
     const split = splitPlan(revisedBody);
@@ -454,6 +477,7 @@ export function applyVerdict(home, runId, roundNo, revisedBody, doc) {
     fs.writeFileSync(path.join(runDir(home, runId), revisedPath), split.body, { mode: 0o600 });
     const agreed = changed && planAgreed(round.review, doc);
     round.verdict = { review_rating: doc.review_rating, verdicts: doc.verdicts, contest_rulings: doc.contest_rulings, assumptions: doc.assumptions, missed: doc.missed, no_further_review: doc.no_further_review === true, at: nowIso() };
+    if (doc.judge_rulings !== undefined) round.verdict.judge_rulings = doc.judge_rulings;
     round.revisedDigest = split.digest;
     round.revisedPath = revisedPath;
     round.ratingValid = !changed;
@@ -481,6 +505,10 @@ export function renderReviewSection(run, receipt) {
   for (const round of run.rounds) for (const ruling of round.verdict?.contest_rulings || []) rulings.set(ruling.id, ruling);
   const hasChange = value => typeof value === 'string' && value.trim() && !/^(?:none|n\/a|no change|unchanged)[.!]?$/i.test(value.trim());
   for (const round of run.rounds) {
+    for (const recommendation of round.judge?.report?.recommendations || []) {
+      const ruling = round.verdict?.judge_rulings?.find(r => r.id === recommendation.id);
+      out.push(`- Advisory judge R${round.round}/${md(recommendation.id)}: ${md(recommendation.recommendation)}; orchestrator ${ruling ? `${md(ruling.ruling)}: ${md(ruling.reason)}` : 'ruling pending'}`);
+    }
     for (const a of round.review?.assumptions || []) assumptions.set(a.id, a);
     for (const a of round.verdict?.assumptions || []) resolutions.set(a.id, a);
     for (const v of round.verdict?.verdicts || []) if (hasChange(v.change) && rulings.get(v.id)?.ruling !== 'reverse') changes.add(`- ${v.verdict === 'discard' ? 'Review change' : 'Applied'} ${md(v.id)}: ${md(v.change)}`);
@@ -641,6 +669,31 @@ function waitCommand(flags) {
   printJson(reviewDoc(run));
   return 0;
 }
+function judgeCommand(flags) {
+  const home = debateHome(); requireWritableHome(home);
+  let payload;
+  if (flags.disputes) {
+    try { payload = JSON.parse(fs.readFileSync(path.resolve(flags.disputes), 'utf8')); }
+    catch (e) { throw usage(`cannot read disputes: ${e.message}`); }
+  }
+  const runId = validateRunId(flags.run), previousAttempt = judgeAttempt(loadRun(home, runId))?.attempt ?? 0;
+  const run = prepareJudge(home, runId, { ...flags, payload });
+  const attempt = judgeAttempt(run);
+  // Preparation claims the worker under the run lock; a concurrent replay only observes it.
+  if (!attempt || attempt.attempt <= previousAttempt || attempt.status !== 'running' || attempt.pid !== process.pid || run.rounds.at(-1).judge.preflight?.status === 'failed') {
+    printJson(reviewDoc(run)); return 0;
+  }
+  const roundNo = currentRound(run).round;
+  if (flags.detach) {
+    const pid = spawnDetached(CLI, ['plan', '_judge-worker', '--run', run.runId, '--round', String(roundNo), '--attempt', String(attempt.attempt)], path.join(runDir(home, run.runId), attempt.dir, 'worker.log'));
+    setJudgePid(home, run.runId, roundNo, attempt.attempt, pid);
+    printJson(reviewDoc(loadRun(home, run.runId), { pid, wait: cliCommand(`plan wait --run ${run.runId} --max-wait 60s`) }));
+  } else {
+    setJudgePid(home, run.runId, roundNo, attempt.attempt, process.pid);
+    printJson(reviewDoc(runJudgeAttempt(home, run.runId, roundNo, attempt.attempt)));
+  }
+  return 0;
+}
 function verdictCommand(flags) {
   const home = debateHome();
   requireWritableHome(home);
@@ -675,8 +728,8 @@ export function main(argv) {
   const cmd = argv[0];
   if (!cmd || cmd === '--help' || cmd === '-h') { process.stdout.write(HELP); return cmd ? 0 : 2; }
   const { flags } = parseArgs(argv.slice(1), {
-    booleans: ['new', 'detach', 'retry', 'json'],
-    values: ['plan', 'cwd', 'seat', 'session', 'timeout', 'run', 'maxWait', 'round', 'verdicts', 'kind', 'since', 'attempt', 'reason', 'reviewerLane', 'selfReview'],
+    booleans: ['new', 'detach', 'retry', 'resume', 'json'],
+    values: ['plan', 'cwd', 'seat', 'session', 'timeout', 'run', 'maxWait', 'round', 'verdicts', 'kind', 'since', 'attempt', 'reason', 'reviewerLane', 'selfReview', 'disputes'],
   });
   if (flags.help) { process.stdout.write(HELP); return 0; }
   ensureHome(debateHome());
@@ -684,10 +737,12 @@ export function main(argv) {
     case 'review': return reviewCommand(flags);
     case 'resume': return reviewCommand({ ...flags, resume: true });
     case 'wait': return waitCommand(flags);
+    case 'judge': return judgeCommand(flags);
     case 'verdict': return verdictCommand(flags);
     case 'finish': return finishCommand(flags);
     case 'stats': return statsCommand(flags, debateHome());
     case '_worker': return workerCommand(flags);
+    case '_judge-worker': runJudgeAttempt(debateHome(), validateRunId(flags.run), Number(flags.round), Number(flags.attempt)); return 0;
     default: throw usage(`unknown command ${cmd}`);
   }
 }

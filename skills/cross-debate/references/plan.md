@@ -42,6 +42,17 @@ completes, reads the result with `wait --run "<run>" --max-wait 1s`. Every other
    Later assumptions use repository facts or stated safe defaults; material unresolved choices remain open.
    Reviewer processes never question the user; this interview does not call ExitPlanMode.
 
+   For a specific unresolved factual dispute, optionally request an advisory third opinion before the verdict:
+   node "<cross-debate-dir>/scripts/debate.mjs" plan judge --run "<run>" --disputes "<json-file>" --detach
+   Observe with plan wait. Claude may run in the background without --detach. Submit one nonempty batch per
+   round, using the current round and merged finding IDs. Example disputes file:
+   {"round":1,"disputes":[{"id":"D1","findingIds":["F1"],"question":"Is the guard sufficient?","positions":[{"position":"Sufficient","reason":"Checks callers","evidence":"app:12"},{"position":"Insufficient","reason":"Public entry bypasses it","evidence":"app:30"}]}]}
+   References must be current findings or findings contested this round. Identical submissions return the stored
+   status/result; changed batches are rejected. This never runs automatically or changes the paired rating.
+   The judge returns debate-plan.judge.v1 with matching round and exactly one recommendations entry per dispute:
+   {"id":"D1","recommendation":"advice or inconclusive","rationale":"why, including missing evidence","evidence":"path:line or evidence absent"}.
+   Verify its advice yourself. The judge cannot create findings, rate plans, or resolve user preferences.
+
 4. Apply accepted changes and answers to the plan; write a verdict JSON file under the run directory:
    {
      "review_rating":8,
@@ -54,6 +65,9 @@ completes, reads the result with `wait --run "<run>" --max-wait 1s`. Every other
    verdict values: confirm|modify|discard; ruling values: uphold|reverse.
    assumption resolution: answered_by_user|settled_from_repo|kept_default|open.
    Cover every finding and contested verdict; empty arrays are valid.
+   After judging, also include judge_rulings: exactly one {"id":"D1","ruling":"accept","reason":"verified why","evidence":"path:line"}
+   per dispute, using accept|modify|reject. Ordinary verdicts and contest rulings remain required. Judge advice
+   and rulings enter later history as context only; only finding modify/discard verdicts remain contestable.
    Omit change when nothing was applied; never write "None". A change field over unchanged text is rejected.
    Set no_further_review true only when every applied change answers a non-blocking finding or a resolved
    assumption; it ends the review early only if the reviewer rated the text >= 8 with no blocking finding.
@@ -80,6 +94,8 @@ completes, reads the result with `wait --run "<run>" --max-wait 1s`. Every other
    Do not fabricate findings, successful review status, or token counts.
 
 7. Finish the current body only after next=stop and a verdict, or the authorized self-review in operations; new, preflight_failed, and continue cannot finish:
+   A recorded judge request blocks verdict, next-round review and finish until judging succeeds, including
+   configuration failures and exhausted attempts. See operations for judge-specific recovery.
    node "<cross-debate-dir>/scripts/debate.mjs" plan finish --run "<run>" --plan "<plan-file>"
    You may instead use --plan - with stdin; append the returned reviewSection verbatim to the finished body.
    Finishing to another file registers that path for the gate; a new run replaces an older review block.

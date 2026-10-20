@@ -48,6 +48,7 @@ export function failReviewAttempt(run, round, attempt, failure, error, result = 
 }
 export function needsUserDecision(run) {
   const round = run.rounds.at(-1);
+  if (round?.judge?.attempts.at(-1)?.status === 'failed' && run.judgeRetryUsed) return true;
   return Boolean(round && !round.review && round.attempts.at(-1)?.status === 'failed' && run.retryUsed);
 }
 export function requireAuthorization(reason) {

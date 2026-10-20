@@ -1,5 +1,17 @@
 # Debate operations
 
+## Optional plan judge recovery
+
+`judging` and `judge_failed` pause only the judge stage; paired reviews and their retry budget stay intact.
+A valid request with failed preflight remains pending without an attempt. Restore the saved lane binding,
+then repeat the identical submission or use `plan judge --run <id> --retry`; preflight retries are free.
+For a launched failure, use that retry command once per plan run. Rate limits exhaust it immediately;
+read-only violations require investigation/remediation, recorded with `--reason`, before retry.
+After exhaustion, ask the user. Their authorization grants one attempt on the original snapshot:
+`plan judge --run <id> --resume --seat <seat> --session <id> --reason "user authorized: <actual instruction>"`.
+Use the original owner, add --detach outside Claude, and observe with plan wait. Resume grants no fresh
+automatic retry; never switch agents or bypass the pending judge by finishing or rerunning the reviewers.
+
 `<cross-debate-dir>` is the installed skill directory, resolved as SKILL.md describes. Substitute it before executing commands; use the quoted, literal absolute entrypoint path for native permission matching.
 
 ## Scope
