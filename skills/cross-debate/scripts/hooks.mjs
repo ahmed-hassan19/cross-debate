@@ -12,6 +12,7 @@ import {
   repositoryScope, worktreeRoots, treeOf, git, appendAuditRow,
 } from './lib/common.mjs';
 import { checkReceipt } from './plan.mjs';
+import { needsUserDecision } from './lib/recovery.mjs';
 
 const PLAN_GUIDE = path.join(SKILL_DIR, 'references', 'plan.md');
 const CODE_GUIDE = path.join(SKILL_DIR, 'references', 'code.md');
@@ -185,15 +186,14 @@ function repositoryReceipts(home, root, gitOpts) {
 }
 
 /** Give the Stop hook lifecycle-aware guidance for the active code candidate. */
-function activeCodeRunHint(home, active, sessionKeyValue, head) {
-  if (!active || !active.runId) return null;
+function activeCodeRunHint(home, active, sessionKeyValue, head, includePending = false) {
+  if (!active?.runId || active.sessionKey !== sessionKeyValue) return null;
   let run;
   try { run = loadRun(home, active.runId); } catch { return null; }
   if (!run || run.kind !== 'code') return null;
-  const owner = active.sessionKey === sessionKeyValue ? 'this session' : `session ${run.sessionId}`;
   const round = run.rounds?.at(-1) || null;
   const attempt = round?.attempts?.at(-1) || null;
-  const label = `active candidate run ${run.runId} (${owner})`;
+  const label = `active candidate run ${run.runId} (this session)`;
 
   if (run.status === 'running' && attempt?.status === 'running') {
     if (isPidAlive(attempt.pid)) {
@@ -219,12 +219,30 @@ function activeCodeRunHint(home, active, sessionKeyValue, head) {
       note: 'blocked: next review round required',
     };
   }
+  if (run.status === 'review_failed' || needsUserDecision(run) || run.stopReason === 'reviewer_failed') {
+    return {
+      reason: needsUserDecision(run) || run.retryUsed
+        ? `${label} has a failed review requiring a user decision. Follow the reviewer-failure recovery in ${CODE_GUIDE}; do not finish it as reviewed.`
+        : `${label} has a failed review. Investigate the failure, then use the one automatic retry: ${code(`review --run ${run.runId} --retry`)}; follow ${CODE_GUIDE}.`,
+      note: 'blocked: reviewer recovery required',
+    };
+  }
   if (run.status === 'stopped') {
     return {
       reason: `${label} has a completed review and verdict but no terminal receipt. Run finish --run ${run.runId} before reporting completion.`,
       note: 'blocked: finish required',
     };
   }
+  if (run.status === 'finished') return {
+    reason: `${label} remains active with outcome ${run.outcome}. Follow its recorded recovery in ${CODE_GUIDE}; an unresolved outcome is not a completed review.`,
+    note: 'blocked: unresolved candidate outcome',
+  };
+  if (includePending || !['new', 'round_open'].includes(run.status)) return {
+    reason: head === active.baseSha
+      ? `${label} is awaiting its candidate commit. Commit the intended changes, then run ${code(`review --run ${run.runId}`)}; keep this existing candidate.`
+      : `${label} needs review. Amend any outstanding intended changes, then run ${code(`review --run ${run.runId}`)} and follow verdict/finish in ${CODE_GUIDE}.`,
+    note: 'blocked: existing candidate needs review',
+  };
   return null;
 }
 /** Commits reachable from head but not from base nor any remote-tracking ref, each with parents and tree. Null when Git cannot answer. */
@@ -273,13 +291,25 @@ function codeStopGate({ seat, sessionId, cwd, input, home, gitOpts }) {
   if (input.stopHookActive) return { output: null, note: 'stop_hook_active: already blocked this turn' };
   const head = headSha(root, gitOpts);
   if (!head) return { output: null, note: 'unborn HEAD' };
+  const active = ledger?.active;
+  const owns = active?.sessionKey === key;
+  const activeHint = activeCodeRunHint(home, active, key, head);
+  if (activeHint) return { output: block(`debate-code: ${activeHint.reason}`), note: activeHint.note };
+  const existingCandidate = () => {
+    const hint = activeCodeRunHint(home, active, key, head, true);
+    return { output: block(`debate-code: ${hint?.reason || `this session owns active candidate ${active.runId}; inspect its recorded state and continue review --run ${active.runId} per ${CODE_GUIDE}.`}`), note: hint?.note || 'blocked: active candidate' };
+  };
+  const observerHint = `Edit authorship is unknown.${active ? ` The foreign owner is ${active.seat} session ${active.sessionId}, run ${active.runId}.` : ''} If this session has no outstanding implementation changes of its own, declare it: ${code(`observe --seat ${seat} --session ${sessionId} --cwd ${JSON.stringify(root)}`)} --reason "<basis from this session's actions>". Otherwise use a legitimate unfinished checkpoint or a separate worktree.`;
   const baseline = ledger && ledger.baselines[key];
   const deferHint = `If this turn is an unfinished checkpoint or a question, run: ${code(`defer --seat ${seat} --session ${sessionId} --cwd ${JSON.stringify(root)}`)} --reason "<why unfinished>"`;
   if (!baseline) {
-    return { output: block(`debate-code: no session baseline is registered for ${root}. Register the before-change commit explicitly: ${code(`baseline --seat ${seat} --session ${sessionId} --cwd ${JSON.stringify(root)}`)} --base <before-change-sha> --reason "<basis>" (current HEAD ${head.slice(0, 12)} is acceptable only if nothing changed in this session). Then follow ${CODE_GUIDE} (begin/adopt → commit → review → verdict → finish). ${deferHint}`), note: 'blocked: no baseline' };
+    if (owns) return existingCandidate();
+    if (active) return { output: block(`debate-code: no session baseline is registered for ${root}. ${observerHint} ${deferHint}`), note: 'blocked: no baseline' };
+    return { output: block(`debate-code: no session baseline is registered for ${root}. Register the before-change commit explicitly: ${code(`baseline --seat ${seat} --session ${sessionId} --cwd ${JSON.stringify(root)}`)} --base <before-change-sha> --reason "<basis>" (current HEAD ${head.slice(0, 12)} is acceptable only if nothing changed in this session). Then follow ${CODE_GUIDE} (begin/adopt → commit → review → verdict → finish). ${observerHint} ${deferHint}`), note: 'blocked: no baseline' };
   }
   const fingerprint = startFingerprint(root, gitOpts);
   if (head === baseline.headSha && fingerprint === baseline.startFingerprint) return { output: null, note: 'nothing changed since the session baseline' };
+  if (owns) return existingCandidate();
   let dirty = [];
   try { dirty = porcelainStatus(root, gitOpts); } catch { dirty = [{ code: '??', path: '<status unavailable>' }]; }
   const clean = dirty.length === 0;
@@ -296,7 +326,7 @@ function codeStopGate({ seat, sessionId, cwd, input, home, gitOpts }) {
   if (receipted) {
     // the commit is already certified; only the worktree differs, so a full re-review of the same tree is the wrong reflex
     const shown = dirty.slice(0, 5).map(e => `${(e.code || '??').trim() || '??'} ${e.path}`).join(', ');
-    return { output: block(`debate-code: HEAD ${head.slice(0, 12)} already has a passed/waived receipt; only the worktree is dirty (${dirty.length} entr${dirty.length === 1 ? 'y' : 'ies'}: ${shown}). Remove or ignore generated artifacts, or commit intended changes as a new candidate (begin → commit → review → verdict → finish per ${CODE_GUIDE}); do not re-review the unchanged commit. ${deferHint}`), note: 'blocked: dirty worktree over a receipted HEAD' };
+    return { output: block(`debate-code: HEAD ${head.slice(0, 12)} already has a passed/waived receipt; only the worktree is dirty (${dirty.length} entr${dirty.length === 1 ? 'y' : 'ies'}: ${shown}). ${active ? '' : `Remove or ignore generated artifacts, or review intended changes as a new candidate per ${CODE_GUIDE}; do not re-review the unchanged commit. `}${observerHint} ${deferHint}`), note: 'blocked: dirty worktree over a receipted HEAD' };
   }
   const moved = head !== baseline.headSha;
   if (clean && moved) {
@@ -306,13 +336,9 @@ function codeStopGate({ seat, sessionId, cwd, input, home, gitOpts }) {
     if (since && since.every(c => c.parents.length >= 2 || isReceipted(c.sha, c.tree))) return { output: null, note: 'HEAD moved by published, receipted, or merge commits only' };
   }
   const promotionHint = moved ? ` If HEAD moved because reviewed work was merged, pulled, or rebased (a promotion, not new work), register it: ${code(`baseline --seat ${seat} --session ${sessionId} --cwd ${JSON.stringify(root)}`)} --base ${head} --reason "promotion: <what was merged and where it was reviewed>"; never create a no-op candidate to re-review promoted work.` : '';
-  const active = ledger.active;
-  const activeHint = activeCodeRunHint(home, active, key, head);
-  if (activeHint) return { output: block(`debate-code: ${activeHint.reason}`), note: activeHint.note };
-  const activeNote = active ? (active.sessionKey === key ? ` Active candidate: run ${active.runId} (base ${active.baseSha.slice(0, 12)}); continue with review/verdict/finish.` : ` Note: run ${active.runId} (session ${active.sessionId}) owns this worktree's active candidate.`) : '';
   const untrackedOnly = !clean && dirty.every(e => e.code === '??');
   const untrackedHint = untrackedOnly ? ` Every dirty path is untracked: if they are local-only (e.g. CLAUDE.md, AGENTS.md) or generated, add them to .git/info/exclude instead of committing; never stage them just to clear this gate.` : '';
-  return { output: block(`debate-code: work changed since the session baseline ${baseline.headSha.slice(0, 12)} and HEAD ${head.slice(0, 12)} has no passed/waived review receipt${clean ? '' : ' (worktree is dirty)'}.${untrackedHint} Follow ${CODE_GUIDE}: begin (or adopt) → git add -A → git commit → review → verdict → finish, with session ${sessionId} and cwd ${JSON.stringify(root)}.${activeNote}${promotionHint} ${deferHint}`), note: 'blocked: unreviewed changes' };
+  return { output: block(`debate-code: work changed since the session baseline ${baseline.headSha.slice(0, 12)} and HEAD ${head.slice(0, 12)} has no passed/waived review receipt${clean ? '' : ' (worktree is dirty)'}.${untrackedHint} ${active ? '' : `Follow ${CODE_GUIDE}: begin (or adopt) → git add -A → git commit → review → verdict → finish, with session ${sessionId} and cwd ${JSON.stringify(root)}.${promotionHint} `}${observerHint} ${deferHint}`), note: 'blocked: unreviewed changes' };
 }
 function onStop(ctx) {
   if (!repositoryScope(ctx.cwd, { home: ctx.home, ...ctx.gitOpts }).effective) return { output: null, note: 'outside automatic scope' };

@@ -1249,6 +1249,101 @@ test('code Stop reports an active review instead of suggesting a duplicate candi
   assert.match(result.output.reason, /awaiting a verdict/);
 });
 
+test('owned review obligations beat missing or forged baselines, receipts and promotions', () => {
+  for (const status of ['running', 'awaiting_verdict', 'continue', 'stopped', 'review_failed', 'finished']) {
+    const repo = makeRepo(), sid = 'owner-order';
+    const identity = common.repoIdentity(repo);
+    const runId = cli('code', ['begin', '--seat', 'claude', '--session', sid, '--cwd', repo]).json.runId;
+    fs.writeFileSync(path.join(repo, 'owner.txt'), 'candidate');
+    commitAll(repo, 'candidate');
+    startCodeRoundAndAttempt(runId);
+    common.updateRun(HOME, runId, r => {
+      r.status = status;
+      if (status === 'finished') r.outcome = 'exhausted_with_blockers';
+      r.rounds[0].attempts[0].pid = process.pid;
+      if (status !== 'running') r.rounds[0].attempts[0].status = status === 'review_failed' ? 'failed' : 'completed';
+      return r;
+    });
+    const stop = () => hook('claude', 'Stop', hookPayload(sid, repo));
+    for (const forged of [false, true]) {
+      if (forged) common.updateLedger(HOME, identity, l => {
+        l.baselines[common.sessionKey('claude', sid)] = { headSha: common.headSha(repo), startFingerprint: common.startFingerprint(repo) };
+        l.receipts.push({ commitSha: common.headSha(repo), outcome: 'passed' });
+        return l;
+      });
+      const result = stop();
+      assert.equal(result.output.decision, 'block');
+      assert.doesNotMatch(result.output.reason, /baseline|promotion:|code begin|git add -A/);
+      assert.match(result.output.reason, new RegExp(runId));
+      if (status === 'review_failed') assert.match(result.output.reason, /--retry/);
+    }
+    const baseline = cli('code', ['baseline', '--seat', 'claude', '--session', sid, '--cwd', repo, '--base', common.headSha(repo), '--reason', 'reset']);
+    assert.equal(baseline.status, 2);
+    assert.match(baseline.stdout + baseline.stderr, /active candidate/);
+  }
+});
+
+test('owners without SessionStart and new owners after commit get their existing next action', () => {
+  for (const baseline of [false, true]) {
+    const repo = makeRepo(), sid = 'owner-new';
+    if (baseline) hook('claude', 'SessionStart', hookPayload(sid, repo));
+    const runId = cli('code', ['begin', '--seat', 'claude', '--session', sid, '--cwd', repo]).json.runId;
+    const stop = () => hook('claude', 'Stop', hookPayload(sid, repo));
+    if (baseline) assert.equal(stop().output, null); // existing unchanged-checkout checkpoint
+    else assert.match(stop().output.reason, /awaiting its candidate commit/);
+    fs.writeFileSync(path.join(repo, 'owner.txt'), 'candidate');
+    assert.match(stop().output.reason, /awaiting its candidate commit/);
+    commitAll(repo, 'candidate');
+    const reason = stop().output.reason;
+    assert.match(reason, new RegExp(`review --run ${runId}`));
+    assert.doesNotMatch(reason, /baseline|promotion:|begin/);
+  }
+});
+
+test('failed owners get retry or user-decision recovery, never a successful-finish instruction', () => {
+  const repo = makeRepo(), sid = 'owner-failed';
+  const runId = cli('code', ['begin', '--seat', 'claude', '--session', sid, '--cwd', repo]).json.runId;
+  fs.writeFileSync(path.join(repo, 'owner.txt'), 'candidate');
+    commitAll(repo, 'candidate');
+  startCodeRoundAndAttempt(runId);
+  common.updateRun(HOME, runId, r => {
+    r.status = 'stopped'; r.stopReason = 'reviewer_failed'; r.retryUsed = true;
+    r.rounds[0].attempts[0].status = 'failed'; return r;
+  });
+  const r = hook('claude', 'Stop', hookPayload(sid, repo));
+  assert.equal(r.note, 'blocked: reviewer recovery required');
+  assert.match(r.output.reason, /user decision/);
+  assert.doesNotMatch(r.output.reason, /Run finish|--retry|baseline|begin/);
+  common.updateRun(HOME, runId, r => { r.status = 'running'; r.rounds[0].attempts[0].status = 'running'; r.rounds[0].attempts[0].pid = 99999999; return r; });
+  assert.equal(hook('claude', 'Stop', hookPayload(sid, repo)).note, 'blocked: review worker needs reaping');
+});
+
+test('foreign lifecycle details stay advisory across missing baseline, dirty receipt and fallback blocks', () => {
+  for (const status of ['running', 'awaiting_verdict', 'continue', 'stopped']) {
+    const repo = makeRepo(), sid = 'foreign-reader';
+    const identity = common.repoIdentity(repo);
+    const runId = cli('code', ['begin', '--seat', 'claude', '--session', 'foreign-owner', '--cwd', repo]).json.runId;
+    common.updateRun(HOME, runId, r => { r.status = status; return r; });
+    fs.writeFileSync(path.join(repo, 'foreign.txt'), 'foreign');
+    const stop = () => hook('claude', 'Stop', hookPayload(sid, repo));
+    for (const kind of ['missing', 'fallback', 'receipted', 'closed']) {
+      if (kind === 'fallback') {
+        hook('claude', 'SessionStart', hookPayload(sid, repo));
+        fs.appendFileSync(path.join(repo, 'foreign.txt'), 'changed');
+      }
+      if (kind === 'receipted') common.updateLedger(HOME, identity, l => { l.receipts.push({ commitSha: common.headSha(repo), outcome: 'passed' }); return l; });
+      if (kind === 'closed') common.updateLedger(HOME, identity, l => { l.active = null; return l; });
+      const reason = stop().output.reason;
+      assert.match(reason, /Edit authorship is unknown/);
+      assert.match(reason, /observe --seat claude/);
+      if (kind !== 'closed') {
+        assert.match(reason, /foreign-owner/);
+        assert.doesNotMatch(reason, /wait --run|verdict before|finish --run|Amend|begin|git add -A|baseline --seat/);
+      }
+    }
+  }
+});
+
 test('deferral sequence: block, defer, stop_hook_active consumes, next prompt, unreviewed Stop blocks again', () => {
   const repo = makeRepo();
   const sid = 'sess-defer';

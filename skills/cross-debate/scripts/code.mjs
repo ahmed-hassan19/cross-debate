@@ -138,6 +138,7 @@ function baselineCommand(flags) {
   const record = baselineRecord({ seat, sessionId, root, headSha: base, source: 'explicit', reason: flags.reason });
   let event;
   updateLedger(home, identity, (l) => {
+    if (l.active?.sessionKey === key) throw usage(`this session owns active candidate ${l.active.runId}; continue its review instead of resetting the baseline`);
     l.baselines[key] = record;
     event = auditEvent(l, { type: 'baseline_registered', seat, sessionId, headSha: base, currentHead: head, reason: flags.reason, eventId: record.eventId });
     return l;

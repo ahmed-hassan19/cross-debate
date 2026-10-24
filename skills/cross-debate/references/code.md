@@ -45,7 +45,10 @@ completes, reads the result with `code wait --run "<run>" --max-wait 1s`. Every 
    If publication status is unknown, ask the user before adoption; do not infer it from stale remote refs.
    A parent mismatch must be resolved explicitly; do not rewrite earlier commits to make adoption pass.
 
-3. If Stop reports no session baseline, explicitly register the known before-change commit:
+3. Active owners must continue their existing candidate. After its commit, use review --run <run>;
+   baseline registration is refused while this session owns it. An unchanged-checkout checkpoint still
+   passes for a new/open candidate, but running, verdict, next-round, failure and finish obligations do not.
+   If a non-owner Stop reports no session baseline, explicitly register the known before-change commit:
    node "<cross-debate-dir>/scripts/debate.mjs" code baseline --seat "<seat>" --session "<session>" --cwd "<cwd>" --base "<before-change-sha>" --reason "<basis for this baseline>"
    HEAD is acceptable only when nothing changed; registration is audited.
    For an already-created non-root candidate, use its intended sole parent and then the adoption command.
