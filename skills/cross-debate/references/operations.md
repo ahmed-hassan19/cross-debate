@@ -49,9 +49,9 @@ No per-use user approval is needed for this honor-based declaration. Binding is 
 same still-active worktree/candidate, and does not transfer ownership. Repeating an identical binding is
 idempotent; a conflicting native binding is rejected while active. Run files, receipts and the original
 review/resume IDs stay unchanged. Stop, reminders, baseline and observe recognize either identity.
-Binding enables lifecycle owner checks; caller-aware Git enforcement is a separate follow-up. Same raw IDs on different seats remain distinct.
-Native-ID workflows need no binding. OpenCode/Cursor begin output announces this path; use native host
-session context for an unknown ID. Caller-aware denial guidance belongs to the follow-up Git guard.
+Git caller checks use the bound native ID when present. Same raw IDs on different seats remain distinct.
+Native-ID workflows need no binding. OpenCode/Cursor begin output announces this path; if the native ID
+is unknown, the first denied commit supplies it and an exact binding command for the originating host.
 Workflow-token checkpoint deferrals target the bound native session and its current prompt generation,
 retaining the original workflow identity in audit metadata. A terminal finish/waiver advances both owner
 baselines before removing the alias with active state. Never bind an unrelated concurrent session to clear a denial.
@@ -62,6 +62,28 @@ baselines before removing the alias with active state. Never bind an unrelated c
 | Codex | Yes, trusted hooks | Yes, trusted hooks | Yes | Yes |
 | OpenCode | Yes, experimental | No | CLI only | Yes |
 | Cursor | Yes, experimental | No | CLI only | Yes |
+
+## Lost originating session
+
+First restore the original host session if available. Binding declares two IDs for that same originating
+session; it cannot transfer a candidate to a replacement session. Otherwise explicitly arrange recovery:
+
+1. Inspect the old run and preserve every dirty tracked/untracked path in a named stash, for example
+   `git stash push --include-untracked -m "lost-owner-recovery-<run>"`. Record the stash commit, inspect its
+   contents, and verify `git status --porcelain` is empty. Preserve ignored work separately if it matters.
+   Do not use reset/clean or drop the stash to clear the guard.
+2. Honor the old run's restrictions. A running worker must complete or be reaped with `code wait --run <id>`;
+   an awaiting verdict needs its verified verdict before closure. Reviewer failures retain their retry and
+   explicit user-decision requirements. Use finish only for a valid completed review. Otherwise obtain the
+   existing explicit user approval before `code waive --run <id> --reason "user approved: <actual instruction>"`.
+   An awaiting-commit run at its clean base is abandoned without a receipt; an existing candidate commit
+   can be waived only under the existing rules. Never fabricate a verdict, waiver approval or review pass.
+3. After the old active run closes, begin using the replacement session's native ID. Apply the preserved
+   stash by its recorded commit without dropping it, inspect the recovered tracked/untracked contents,
+   commit and review the recovered changes. Keep the stash until restoration and review are verified.
+
+These steps do not grant another automatic reviewer retry or authorize publication. An unrelated concurrent
+session should use its own worktree; never use binding, an automatic waiver or DEBATE=off as a takeover path.
 
 ## Reviewer failure and recovery
 
@@ -120,6 +142,18 @@ Untracked-file fingerprints use size and floored mtime as a cheap change detecto
 
 ## Hooks and verification
 
+All four adapters supply their validated native caller identity for shell commit/amend checks. With the
+Git gate enabled and a resolved active candidate, only its effective native owner can commit or amend.
+When bound, the native alias is the Git identity; original IDs remain valid for lifecycle/recovery commands.
+A denial names caller and workflow owner, supplies an exact binding command on the originating host when
+unbound, and links the conditional lost-session recovery path. Helpers omitting caller identity retain
+compatibility. Target cwd and literal git -C resolution, scope opt-outs and exact push/delete permits stay
+unchanged. This guards workflow operations, not exclusive file access: files and staging remain shared.
+Host-marked subagent shell events use the native session ID actually supplied; no parent ID is inferred.
+Subagent reminders, SessionStart, Stop and plan events remain skipped. Native file writes, unsupported
+shell wrappers and deliberately bypassed DEBATE_CHILD/automation environments are outside attribution
+guarantees. Prefer separate worktrees when concurrent sessions implement changes.
+
 Hooks are best-effort workflow guards, not a security boundary; the shell parser recognizes a limited set of command forms, not arbitrary scripts or aliases. Heredoc bodies (`<<`, `<<-`, including `$(cat <<'EOF' ... EOF)` commit messages) are prose, so apostrophes and the word `push` inside them are harmless; a bare-delimited body still has its `$(...)` and backquote substitutions analyzed, and a body fed to `bash`, `sh`, `zsh`, `dash`, or `ksh` is tokenized as commands, so a push inside either is still gated. Line continuations are joined and leading reserved words (`{`, `!`, `if`, `then`, `do`, …) skipped before the command word is read; a command word or Git subcommand produced by expansion (`$g push`, `git $p`) is denied because it cannot be classified. A heredoc still counts as a substitution for commit forms while a candidate is active.
 
 Owner lifecycle checks precede baseline, receipt and promotion shortcuts. Pending review, dead-worker,
@@ -148,7 +182,7 @@ The offline suite exercises every host adapter, lifecycle gates, scope transitio
 
 `setup hooks --agent <host>` prints the exact entries; `setup doctor` reports which are installed. Every hook runs `debate.mjs hook <host> <event>`, exits 0 on internal errors (fail open), and passes unmapped events through. Claude reminds only in plan mode or while it owns an active candidate; Codex receives a plan or code instruction on every prompt.
 
-On Cursor and OpenCode, invoke the plan and code workflows yourself with `--seat cursor` or `--seat opencode`. Their hooks do not provide the agent with a session ID. Use the actual host session ID if available and valid, or choose a unique token for this task, such as `review-20261002-task`. A valid ID has 1–128 characters, starts with a letter or number, and contains only ASCII letters, numbers, `.`, `_`, `:` or `-`. For a manual code token, bind it to the native ID with `code bind-session` as described in [Session identities](#session-identities); use native host session context to discover an unknown ID. Reuse the original workflow value for every `--session` in the task's plan and code commands, including `baseline`, `defer` and `resume`; resume requires the original seat and session. Outside automatic scope, Claude and Codex can also choose a token for an explicit review when no native session ID is available.
+On Cursor and OpenCode, invoke the plan and code workflows yourself with `--seat cursor` or `--seat opencode`. Their hooks do not provide the agent with a session ID. Use the actual host session ID if available and valid, or choose a unique token for this task, such as `review-20261002-task`. A valid ID has 1–128 characters, starts with a letter or number, and contains only ASCII letters, numbers, `.`, `_`, `:` or `-`. For a manual code token, bind it to the native ID with `code bind-session` as described in [Session identities](#session-identities); the first denied commit reveals an unknown native ID. Reuse the original workflow value for every `--session` in the task's plan and code commands, including `baseline`, `defer` and `resume`; resume requires the original seat and session. Outside automatic scope, Claude and Codex can also choose a token for an explicit review when no native session ID is available.
 
 ## Removal
 

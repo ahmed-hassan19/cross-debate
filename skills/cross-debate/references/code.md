@@ -4,8 +4,8 @@ Only you communicate with the user. Verify every source finding, including withd
 Never push without explicit candidate-and-destination approval; never amend published history.
 Keep the candidate local throughout review; do not bypass project checks or use --no-verify.
 Commands use your seat (`claude`, `codex`, `cursor` or `opencode`) and a stable session ID.
-Prefer the native hook-provided ID. Manual workflow tokens on any seat support an explicit originating-session
-binding to the native ID for lifecycle owner checks, as described in [operations](operations.md#session-identities).
+Prefer the native hook-provided ID. Manual workflow tokens on any seat require an explicit originating-session
+binding to the native ID before guarded commits, as described in [operations](operations.md#session-identities).
 `<cross-debate-dir>` and the scope rules are defined in the skill's SKILL.md. Outside automatic scope, invoke only on
 explicit request; approval requirements still apply even though automatic review and permit guards are inactive.
 The `review` subcommand ([review](review.md)) is the backend; explicit review requests work outside automatic scope.
@@ -48,8 +48,8 @@ completes, reads the result with `code wait --run "<run>" --max-wait 1s`. Every 
 
    When using a manual workflow token, bind it once to this same originating session's native hook ID:
    node "<cross-debate-dir>/scripts/debate.mjs" code bind-session --run "<run>" --seat "<seat>" --session "<workflow-id>" --hook-session "<native-id>" --reason "<basis these are the same originating session>"
-   This works on all four seats. Native-ID workflows need no binding. Use the native host session context
-   to find an unknown ID. Caller-aware Git enforcement is a follow-up; never bind an unrelated session.
+   This works on all four seats. Native-ID workflows need no binding. If OpenCode/Cursor's native ID is
+   unknown, the first denied commit supplies it and the exact command. Never bind an unrelated session.
    Binding preserves the original workflow IDs for review/resume and is removed when the candidate closes.
 
 3. Active owners must continue their existing candidate. After its commit, use review --run <run>;
@@ -71,6 +71,14 @@ completes, reads the result with `code wait --run "<run>" --max-wait 1s`. Every 
    deferral. The acknowledgement permits one Stop at this HEAD, branch and fingerprint in this prompt
    generation, including a repeated Stop after a block. It never resets a baseline, certifies implementation,
    closes a review or approves publication.
+
+   Enabled Git hooks on every host require the effective native owner for commit/amend, including shell
+   events marked as subagents. A manual token needs the explicit binding above; a denial gives the native
+   caller ID and exact command when unbound on the originating host. Unrelated sessions need their own
+   worktree. For a lost originating session, follow [preservation and recovery](operations.md#lost-originating-session)
+   before closing the old run; running reviews, pending verdicts and explicit waiver approval still apply.
+   Shared files/staging, native writes and deliberately bypassed child/automation environments remain shared
+   or outside attribution. This is a workflow guard, not exclusive write access.
 
 4. Review the candidate.
    Claude: invoke this Bash command with run_in_background: true:

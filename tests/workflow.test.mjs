@@ -1348,7 +1348,7 @@ test('explicit native binding on every seat preserves workflow IDs, audits once 
   for (const seat of ['claude', 'codex', 'opencode', 'cursor']) {
     const repo = makeRepo(), sid = 'manual-token', native = 'native-session';
     const begun = cli('code', ['begin', '--seat', seat, '--session', sid, '--cwd', repo]).json;
-    if (['opencode', 'cursor'].includes(seat)) assert.match(begun.sessionBinding, /native ID exposed by the host/);
+    if (['opencode', 'cursor'].includes(seat)) assert.match(begun.sessionBinding, /first denied commit/);
     const identity = common.repoIdentity(repo), ledger = () => common.loadLedger(HOME, identity.repoKey);
     const before = common.loadRun(HOME, begun.runId);
     const args = ['bind-session', '--run', begun.runId, '--seat', seat, '--session', sid, '--hook-session', native, '--reason', 'both IDs identify this originating session'];
@@ -2844,5 +2844,47 @@ test('both plan passes honor seat overrides without changing other seats or mask
     assert.match(untrusted.reason, /secondary-1 reviewer preflight: .*configuration trust/);
   } finally {
     fs.writeFileSync(fleetFile, original);
+  }
+});
+
+test('lost-owner recovery preserves tracked and untracked work in a named stash before authorized closure and a new review', () => {
+  for (const committed of [false, true]) {
+    const repo = makeRepo(), old = 'lost-original', native = 'recovery-native';
+    const oldRun = cli('code', ['begin', '--seat', 'claude', '--session', old, '--cwd', repo]).json.runId;
+    if (committed) { fs.writeFileSync(path.join(repo, 'candidate.txt'), 'old candidate'); commitAll(repo, 'old candidate'); }
+    fs.appendFileSync(path.join(repo, 'app.py'), '# preserved tracked change\n');
+    fs.writeFileSync(path.join(repo, 'loose.txt'), 'preserved untracked work');
+    const tracked = fs.readFileSync(path.join(repo, 'app.py'), 'utf8');
+    assert.equal(common.gitGateDecision({ command: 'git commit -m recovery', cwd: repo, home: HOME, caller: { seat: 'codex', sessionId: native } }).decision, 'deny');
+    gitc(repo, 'stash', 'push', '--include-untracked', '-m', `lost-owner-recovery-${oldRun}`);
+    const preserved = gitc(repo, 'rev-parse', 'stash@{0}');
+    assert.match(gitc(repo, 'stash', 'list'), /lost-owner-recovery-/);
+    assert.equal(gitc(repo, 'status', '--porcelain'), '');
+    assert.equal(cli('code', ['waive', '--run', oldRun, '--reason', 'close old run']).status, 2);
+    assert.equal(cli('code', ['waive', '--run', oldRun, '--reason', 'user approved: close stranded run after preserving all work']).json.outcome, committed ? 'waived' : 'abandoned');
+    const runId = cli('code', ['begin', '--seat', 'codex', '--session', native, '--cwd', repo]).json.runId;
+    gitc(repo, 'stash', 'apply', preserved);
+    assert.equal(fs.readFileSync(path.join(repo, 'app.py'), 'utf8'), tracked);
+    assert.equal(fs.readFileSync(path.join(repo, 'loose.txt'), 'utf8'), 'preserved untracked work');
+    commitAll(repo, 'recovered changes');
+    const reviewed = cli('code', ['review', '--run', runId], { cli: fakeBackendCli(), env: { TEST_RUN_FILE: path.join(common.runDir(HOME, runId), 'run.json'), TEST_BACKEND_FIXTURE: path.join(FIX, 'backend-clean.json') } });
+    assert.equal(reviewed.json.runStatus, 'awaiting_verdict', reviewed.stdout);
+    const verdict = path.join(common.runDir(HOME, runId), 'recovery-verdict.json');
+    fs.writeFileSync(verdict, JSON.stringify({ review_rating: 9, verdicts: [], contest_rulings: [], assumptions: [], missed: [], checks: [] }));
+    assert.equal(cli('code', ['verdict', '--run', runId, '--round', '1', '--verdicts', verdict]).status, 0);
+    assert.equal(cli('code', ['finish', '--run', runId]).json.outcome, 'passed');
+    assert.equal(gitc(repo, 'rev-parse', 'stash@{0}'), preserved); // retained until the recovered work is verified
+  }
+});
+
+test('lost-owner recovery cannot waive or finish a running review or skip its pending verdict', () => {
+  for (const status of ['running', 'awaiting_verdict']) {
+    const repo = makeRepo();
+    const runId = cli('code', ['begin', '--seat', 'claude', '--session', 'stranded', '--cwd', repo]).json.runId;
+    fs.writeFileSync(path.join(repo, 'candidate.txt'), 'candidate'); commitAll(repo, 'candidate');
+    common.updateRun(HOME, runId, r => { r.status = status; return r; });
+    assert.equal(cli('code', ['waive', '--run', runId, '--reason', 'user approved: recover']).status, 2);
+    assert.equal(cli('code', ['finish', '--run', runId]).status, 2);
+    assert.equal(common.loadLedger(HOME, common.repoIdentity(repo).repoKey).active.runId, runId);
   }
 });

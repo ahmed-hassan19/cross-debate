@@ -147,11 +147,11 @@ function exitPlanGate({ seat, sessionId, cwd, input, home, now }) {
   return denial(lastReason);
 }
 function onPreToolUse(ctx) {
-  const { host, input, cwd, home, gitOpts } = ctx;
+  const { host, input, cwd, home, gitOpts, seat, sessionId } = ctx;
   if (host.planGate === 'tool' && input.tool === 'exit_plan') return repositoryScope(cwd, { home, ...gitOpts }).effective ? exitPlanGate(ctx) : { output: null, note: 'outside automatic scope' };
   if (input.tool !== 'shell') return { output: null, note: 'not a shell tool' };
   if (!input.command) return { output: null, note: 'no command' };
-  const decision = gitGateDecision({ command: input.command, cwd: input.toolCwd || cwd, home, gitOpts });
+  const decision = gitGateDecision({ command: input.command, cwd: input.toolCwd || cwd, home, caller: { seat, sessionId }, gitOpts });
   if (decision.decision === 'deny') return { output: deny(decision.reason), note: 'denied' };
   return { output: null, note: decision.approvalId ? `push permitted under approval ${decision.approvalId}` : 'pass' };
 }
@@ -356,7 +356,7 @@ export function handleHook(agent, event, payload, { home = debateHome(), env = p
   if (env.DEBATE === 'off' || automationOff(home)) return { output: null, note: 'automation off' };
   if (!payload || typeof payload !== 'object') return { output: null, note: 'no payload' };
   const input = host.parse(payload);
-  if (input.subagent) return { output: null, note: 'subagent' };
+  if (input.subagent && !(internal === 'PreToolUse' && input.tool === 'shell')) return { output: null, note: 'subagent' };
   const { sessionId } = input;
   if (typeof sessionId !== 'string' || !SESSION_RE.test(sessionId)) return { output: null, note: 'payload has no valid session_id' };
   const cwd = input.cwd || process.cwd();

@@ -825,7 +825,7 @@ export function candidateStateFor(root, active, opts) {
  * PreToolUse Git gate. Returns { decision: 'pass' } or { decision: 'deny', reason }.
  * Commit forms pass silently unless the resolved worktree owns an active candidate; push allows only the approved form.
  */
-export function gitGateDecision({ command, cwd, home, gitOpts = {} }) {
+export function gitGateDecision({ command, cwd, home, caller = null, gitOpts = {} }) {
   const analysis = analyzeCommand(command);
   if (analysis.error && /(?:^|[\s"'();|&])push(?=$|[\s"'();|&])/.test(command)) return { decision: 'deny', reason: 'debate-code: unsupported push command (invalid shell syntax); use a literal Git command.' };
   const muts = analysis.mutations;
@@ -852,6 +852,12 @@ export function gitGateDecision({ command, cwd, home, gitOpts = {} }) {
   if (muts.length > 1) return { decision: 'deny', reason: `debate-code: run ${ownersActive[0].ledger.active.runId} owns the active candidate; only one Git commit per command is allowed while a candidate is active.` };
   const { m, identity, ledger } = ownersActive[0];
   const active = ledger.active;
+  if (caller && sessionKey(caller.seat, caller.sessionId) !== (active.hookSessionKey || active.sessionKey)) {
+    const binding = caller.seat === active.seat && !active.hookSessionKey
+      ? ` If these IDs identify the same originating session, explicitly declare it: ${cliCommand(`code bind-session --run ${active.runId} --seat ${active.seat} --session ${active.sessionId} --hook-session ${caller.sessionId}`)} --reason "<basis that both IDs identify this originating session>".`
+      : ` An explicit binding is supported only for the originating ${active.seat} session; an existing conflicting binding cannot be replaced while active.`;
+    return { decision: 'deny', reason: `debate-code: native caller ${caller.seat} session ${caller.sessionId} cannot commit/amend candidate run ${active.runId}, owned by workflow ${active.seat} session ${active.sessionId}${active.hookSessionId ? ` (bound native session ${active.hookSessionId})` : ''}.${binding} Unrelated sessions must use their own worktree. For a lost originating session, follow ${path.join(SKILL_DIR, 'references', 'operations.md')}#lost-originating-session; recovery requires preserving work and closing the old run under its existing restrictions, not transferring ownership.` };
+  }
   const form = unsupportedForm(m);
   if (form) return { decision: 'deny', reason: `debate-code: run ${active.runId} owns the active candidate in ${identity.worktreeRoot}; unsupported commit form (${form}). Use a literal "git commit -m ..." or "git commit --amend --no-edit".` };
   if (m.args.some(a => a === '--no-verify' || a === '-n')) return { decision: 'deny', reason: 'debate-code: --no-verify/-n bypasses project checks and is not allowed for an active candidate.' };

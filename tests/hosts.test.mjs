@@ -640,3 +640,90 @@ test('scope prints a short summary at a terminal and the full JSON otherwise', a
   assert.equal(here.status, 0, here.stderr);
   assert.equal(JSON.parse(here.stdout).identity.worktreeRoot, repo, 'scope defaults to the current project');
 });
+
+test('all native adapters guard first commits and amends by effective owner and target worktree', () => {
+  const invoke = (seat, sid, cwd, command, toolCwd) => {
+    const payload = seat === 'cursor' ? { conversation_id: sid, cwd: toolCwd || cwd, command }
+      : seat === 'opencode' ? { sessionID: sid, directory: cwd, tool: 'bash', args: { command, workdir: toolCwd } }
+      : { session_id: sid, cwd, tool_name: 'Bash', tool_input: { command, cwd: toolCwd } };
+    const event = seat === 'cursor' ? 'beforeShellExecution' : seat === 'opencode' ? 'tool.execute.before' : 'PreToolUse';
+    return hooks.handleHook(seat, event, payload, { home: HOME });
+  };
+  for (const seat of ['claude', 'codex', 'cursor', 'opencode']) {
+    const repo = enrolledRepo(`caller-${seat}`), elsewhere = enrolledRepo(`elsewhere-${seat}`);
+    const owner = 'owner-native', foreign = 'foreign-native';
+    const begun = run(['code', 'begin', '--seat', seat, '--session', owner, '--cwd', repo]);
+    assert.equal(begun.status, 0, begun.stdout);
+    const runId = JSON.parse(begun.stdout).runId;
+    for (const command of ['git commit -m candidate', 'git commit --amend --no-edit']) {
+      const denied = invoke(seat, foreign, repo, command);
+      assert.equal(denied.note, 'denied');
+      assert.match(JSON.stringify(denied.output), /native caller/);
+      assert.match(JSON.stringify(denied.output), /foreign-native/);
+      assert.match(JSON.stringify(denied.output), /owner-native/);
+      assert.match(JSON.stringify(denied.output), /bind-session/);
+      assert.match(JSON.stringify(denied.output), /lost-originating-session/);
+    }
+    assert.equal(invoke(seat, owner, repo, 'git commit -m candidate').output, null);
+    assert.equal(common.gitGateDecision({ command: 'git commit -m candidate', cwd: repo, home: HOME }).decision, 'pass');
+    assert.equal(invoke(seat, foreign, elsewhere, `git -C ${repo} commit -m candidate`).note, 'denied');
+    assert.equal(invoke(seat, foreign, elsewhere, 'git commit -m candidate', repo).note, 'denied');
+    assert.equal(invoke(seat, foreign, repo, `git -C ${elsewhere} commit -m other`).output, null);
+    const bind = run(['code', 'bind-session', '--run', runId, '--seat', seat, '--session', owner, '--hook-session', 'bound-native', '--reason', 'same originating session']);
+    assert.equal(bind.status, 0, bind.stdout);
+    assert.equal(invoke(seat, 'bound-native', repo, 'git commit -m candidate').output, null);
+    assert.equal(invoke(seat, foreign, repo, 'git commit -m candidate').note, 'denied');
+    fs.writeFileSync(path.join(repo, 'candidate.txt'), 'candidate'); commitAllIn(repo, 'candidate');
+    assert.equal(invoke(seat, 'bound-native', repo, 'git commit --amend --no-edit').output, null);
+    assert.equal(invoke(seat, foreign, repo, 'git commit --amend --no-edit').note, 'denied');
+    assert.equal(invoke(seat, owner, repo, 'git commit --amend --no-edit').note, 'denied');
+    const otherSeat = seat === 'claude' ? 'codex' : 'claude';
+    assert.equal(invoke(otherSeat, 'bound-native', repo, 'git commit --amend --no-edit').note, 'denied');
+    assert.equal(common.gitGateDecision({ command: 'git commit --amend --no-edit', cwd: repo, home: HOME }).decision, 'pass');
+    const direct = enrolledRepo(`direct-${seat}`);
+    assert.equal(run(['code', 'begin', '--seat', seat, '--session', owner, '--cwd', direct]).status, 0);
+    fs.writeFileSync(path.join(direct, 'native.txt'), 'native'); commitAllIn(direct, 'native');
+    assert.equal(invoke(seat, owner, direct, 'git commit --amend --no-edit').output, null);
+    assert.equal(invoke(seat, foreign, direct, 'git commit --amend --no-edit').note, 'denied');
+    const linked = path.join(SCRATCH, `linked-${seat}`);
+    assert.equal(spawnSync('git', ['worktree', 'add', '-b', `linked-${seat}`, linked], { cwd: repo }).status, 0);
+    assert.equal(invoke(seat, foreign, linked, 'git commit -m own-candidate').output, null);
+    common.changeRepositoryScope(repo, false, HOME, 'debate.gitGate');
+    assert.equal(invoke(seat, foreign, repo, 'git commit --amend --no-edit').output, null);
+    common.changeRepositoryScope(repo, true, HOME, 'debate.gitGate');
+    spawnSync('git', ['config', '--local', 'debate.enabled', 'false'], { cwd: repo });
+    assert.equal(invoke(seat, foreign, repo, 'git commit --amend --no-edit').output, null);
+  }
+});
+
+test('native subagent shell calls use their supplied ID while other subagent events and explicit opt-outs stay skipped', () => {
+  for (const seat of ['claude', 'codex']) {
+    const repo = enrolledRepo(`subagent-${seat}`), owner = 'native-parent';
+    assert.equal(run(['code', 'begin', '--seat', seat, '--session', owner, '--cwd', repo]).status, 0);
+    const subagent = seat === 'claude' ? { agent_id: 'child', agent_type: 'worker' } : { subagent: { id: 'child' } };
+    const payload = (sid, command = 'git commit -m candidate') => ({ session_id: sid, cwd: repo, tool_name: 'Bash', tool_input: { command }, ...subagent });
+    const hook = (event, p, env) => hooks.handleHook(seat, event, p, { home: HOME, env: env || process.env });
+    assert.equal(hook('PreToolUse', payload(owner)).output, null);
+    assert.equal(hook('PreToolUse', payload('child-native')).note, 'denied');
+    assert.match(JSON.stringify(hook('PreToolUse', payload('child-native')).output), /child-native/);
+    fs.writeFileSync(path.join(repo, 'subagent.txt'), 'candidate'); commitAllIn(repo, 'candidate');
+    assert.equal(hook('PreToolUse', payload(owner, 'git commit --amend --no-edit')).output, null);
+    assert.equal(hook('PreToolUse', payload('child-native', 'git commit --amend --no-edit')).note, 'denied');
+    assert.match(hook('PreToolUse', payload('../invalid')).note, /valid session/);
+    for (const event of ['Stop', 'SessionStart', 'UserPromptSubmit']) assert.equal(hook(event, payload(owner)).note, 'subagent');
+    for (const tool_name of ['Read', 'ExitPlanMode']) assert.equal(hook('PreToolUse', { ...payload(owner), tool_name }).note, 'subagent');
+    assert.equal(hook('PreToolUse', payload('child-native'), { ...process.env, DEBATE_CHILD: '1' }).note, 'child session');
+    assert.equal(hook('PreToolUse', payload('child-native'), { ...process.env, DEBATE: 'off' }).note, 'automation off');
+  }
+});
+
+test('generated OpenCode plugin forwards native identity for active-candidate commits', async () => {
+  const repo = enrolledRepo('native-plugin');
+  assert.equal(run(['code', 'begin', '--seat', 'opencode', '--session', 'native-plugin-owner', '--cwd', repo]).status, 0);
+  const pluginFile = path.join(SCRATCH, 'native-plugin.mjs');
+  fs.writeFileSync(pluginFile, setup.opencodePlugin(CLI));
+  const { DebateGitGate } = await import(pathToFileURL(pluginFile).href);
+  const gate = await DebateGitGate({ directory: repo });
+  await gate['tool.execute.before']({ tool: 'bash', sessionID: 'native-plugin-owner' }, { args: { command: 'git commit -m candidate' } });
+  await assert.rejects(gate['tool.execute.before']({ tool: 'bash', sessionID: 'native-plugin-foreign' }, { args: { command: 'git commit -m candidate' } }), /native-plugin-foreign/);
+});
