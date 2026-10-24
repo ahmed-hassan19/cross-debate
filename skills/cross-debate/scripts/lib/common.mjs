@@ -349,8 +349,9 @@ export function treeOf(cwd, commit, opts) { return gitText(cwd, ['rev-parse', `$
 export function parentsOf(cwd, commit, opts) {
   return gitText(cwd, ['rev-list', '--parents', '-n', '1', commit], opts).split(/\s+/).slice(1).filter(Boolean);
 }
-export function branchOf(cwd, opts) {
+export function branchOf(cwd, { strict = false, ...opts } = {}) {
   const r = git(cwd, ['symbolic-ref', '-q', '--short', 'HEAD'], { allowFail: true, ...opts });
+  if (strict && r.status !== 0 && r.status !== 1) throw new Error(`cannot read branch: ${r.stderr}`);
   return r.status === 0 ? r.stdout.trim() : null;
 }
 export function isAncestor(cwd, ancestor, descendant, opts) {
@@ -362,11 +363,11 @@ export function commitsInRange(cwd, base, head, opts) {
   return out ? out.split('\n').map(line => { const [sha, ...parents] = line.split(/\s+/); return { sha, parents }; }) : [];
 }
 /** SHA-256 of `git diff HEAD` plus the sorted untracked list with sizes and mtimes. Change detector only, never a content identity. */
-export function startFingerprint(root, opts) {
+export function startFingerprint(root, { strict = false, ...opts } = {}) {
   const diff = git(root, ['diff', ...(headSha(root, opts) ? ['HEAD'] : ['--cached']), '--no-ext-diff', '--no-color', '--'], opts).stdout;
   const raw = git(root, ['ls-files', '-o', '--exclude-standard', '-z'], opts).stdout;
   const entries = raw.split('\0').filter(Boolean).sort().map(rel => {
-    try { const st = fs.lstatSync(path.join(root, rel)); return `${rel}\0${st.size}\0${Math.floor(st.mtimeMs)}`; } catch { return `${rel}\0missing`; }
+    try { const st = fs.lstatSync(path.join(root, rel)); return `${rel}\0${st.size}\0${Math.floor(st.mtimeMs)}`; } catch (e) { if (strict) throw e; return `${rel}\0missing`; }
   });
   return sha256(diff, '\0', entries.join('\n'));
 }

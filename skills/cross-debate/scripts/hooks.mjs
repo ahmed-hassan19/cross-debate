@@ -9,7 +9,7 @@ import {
   SESSION_RE, SHELLS, SKILL_DIR, usage, nowIso, log, newEventId, debateHome, ensureHome, automationOff, readStdin, cliCommand,
   loadRun, loadSession, updateSession, loadLedger, updateLedger, auditEvent, sessionKey, repoIdentity, headSha, emptyTreeSha, branchOf,
   startFingerprint, porcelainStatus, splitPlan, planPathFromTranscript, extractProposedPlan, gitGateDecision, isPidAlive,
-  repositoryScope, worktreeRoots, treeOf, git,
+  repositoryScope, worktreeRoots, treeOf, git, appendAuditRow,
 } from './lib/common.mjs';
 import { checkReceipt } from './plan.mjs';
 
@@ -105,7 +105,11 @@ function onUserPromptSubmit({ host, seat, sessionId, cwd, input, home, gitOpts }
   const identity = repoIdentity(cwd, gitOpts);
   let active = null;
   if (identity) {
-    const ledger = updateLedger(home, identity, (l) => { l.deferrals = l.deferrals.filter(d => !(d.sessionKey === key && d.generation < session.generation)); return l; });
+    const ledger = updateLedger(home, identity, (l) => {
+      l.deferrals = l.deferrals.filter(d => !(d.sessionKey === key && d.generation < session.generation));
+      if (l.observerAcknowledgements) l.observerAcknowledgements = l.observerAcknowledgements.filter(a => !(a.sessionKey === key && a.generation < session.generation));
+      return l;
+    });
     if (ledger.active && ledger.active.sessionKey === key) active = ledger.active;
   }
   const planMode = input.permissionMode === 'plan';
@@ -247,6 +251,24 @@ function codeStopGate({ seat, sessionId, cwd, input, home, gitOpts }) {
       return l;
     });
     if (consumed) return { output: null, note: 'deferral consumed' };
+  }
+  if (ledger?.observerAcknowledgements?.some(a => a.sessionKey === key && !a.consumed && !a.invalidatedAt)) {
+    let event;
+    ledger = updateLedger(home, identity, l => {
+      const a = l.observerAcknowledgements?.find(a => a.sessionKey === key && !a.consumed && !a.invalidatedAt);
+      if (!a) return l;
+      let valid = false;
+      try {
+        valid = l.active?.sessionKey !== key && a.generation === (loadSession(home, seat, sessionId)?.generation ?? 0)
+          && a.headSha === headSha(root, gitOpts) && a.branch === branchOf(root, { ...gitOpts, strict: true }) && a.fingerprint === startFingerprint(root, { ...gitOpts, strict: true });
+      } catch { /* an unreadable snapshot grants no exception */ }
+      if (valid) { a.consumed = true; a.consumedAt = nowIso(); }
+      else a.invalidatedAt = nowIso();
+      event = auditEvent(l, { type: valid ? 'observer_acknowledgement_consumed' : 'observer_acknowledgement_invalidated', seat, sessionId, generation: a.generation, acknowledgementEventId: a.eventId });
+      return l;
+    });
+    if (event) appendAuditRow(home, { ...event, kind: 'code', repoKey: identity.repoKey });
+    if (event?.type === 'observer_acknowledgement_consumed') return { output: null, note: 'observer acknowledgement consumed' };
   }
   if (input.stopHookActive) return { output: null, note: 'stop_hook_active: already blocked this turn' };
   const head = headSha(root, gitOpts);

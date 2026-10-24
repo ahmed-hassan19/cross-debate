@@ -70,6 +70,19 @@ Independent review remains failed; self-review cannot create a passed debate rec
 
 Reports identify actual reviewer CLI/lane per attempt. Requested model and runtime-served model are distinct; unknown served models remain null, not inferred from lane aliases. Same-model coverage is labeled only when runtime metadata identifies both sides; a second process alone is not independent-model evidence.
 
+## Observer acknowledgements
+
+`code observe --cwd <dir> --seat <seat> --session <id> --reason <basis>` declares no outstanding
+implementation changes of this session's own; without a baseline it covers the whole session. Make this
+honor-based declaration from recorded actions, without per-use user approval. Active owners cannot use it.
+It is separate from checkpoint deferrals and permits one Stop only at the same HEAD, branch, fingerprint
+and prompt generation. Deferrals take priority; acknowledgement consumption precedes recursion handling.
+Drift invalidates permanently, a new prompt prunes earlier generations, and reissuance replaces pending
+acknowledgements. Snapshot read errors grant no exception. Session generation is re-read under the ledger
+lock; this is not a transaction across session files or protection against external filesystem races.
+Baselines, runs, receipts and publication approvals remain untouched. Every seat supports the CLI;
+automatic passage applies only to Claude/Codex Stop hooks. Older hooks ignore this optional ledger field.
+
 ## Dirty artifacts
 
 Keep clean-worktree checks for review, finish, approval, and guarded publication. Inspect exact paths first. For expected generated files, and local-only files the user keeps uncommitted (e.g. `CLAUDE.md`, `AGENTS.md`), propose a narrow project `.gitignore` entry or local `.git/info/exclude`; for Python checks, `PYTHONDONTWRITEBYTECODE=1` can avoid bytecode. Do not globally ignore untracked files, stage junk, delete unknown files, or re-review an unchanged tree merely because a passed receipt coexists with artifacts. Report the receipt and dirty paths; remove only known task-created artifacts when authorized.

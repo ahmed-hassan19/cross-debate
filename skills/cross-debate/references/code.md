@@ -54,6 +54,14 @@ completes, reads the result with `code wait --run "<run>" --max-wait 1s`. Every 
    the promoted HEAD: baseline --base "<HEAD>" --reason "promotion: <what was merged and where it was reviewed>".
    Never create a no-op candidate to re-review promoted work.
 
+   An inspecting session with no outstanding implementation changes of its own can declare:
+   node "<cross-debate-dir>/scripts/debate.mjs" code observe --cwd "<cwd>" --seat "<seat>" --session "<session>" --reason "<basis from this session's actions>"
+   Without a baseline this declaration covers the entire session. It needs no per-use user approval.
+   Active owners cannot observe. Sessions with unfinished edits must review or use a legitimate checkpoint
+   deferral. The acknowledgement permits one Stop at this HEAD, branch and fingerprint in this prompt
+   generation, including a repeated Stop after a block. It never resets a baseline, certifies implementation,
+   closes a review or approves publication.
+
 4. Review the candidate.
    Claude: invoke this Bash command with run_in_background: true:
    node "<cross-debate-dir>/scripts/debate.mjs" code review --run "<run>" --timeout 30m

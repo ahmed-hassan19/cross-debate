@@ -1270,6 +1270,135 @@ test('deferral sequence: block, defer, stop_hook_active consumes, next prompt, u
   assert.equal(hook('claude', 'Stop', hookPayload(sid, repo)).output.decision, 'block');
 });
 
+test('observer acknowledgements pass once without changing review, baseline or publication state', () => {
+  for (const status of ['running', 'awaiting_verdict', 'continue', 'stopped', null]) {
+    const repo = makeRepo();
+    const owner = 'observe-owner', sid = 'observe-reader';
+    hook('claude', 'SessionStart', hookPayload(sid, repo));
+    let runId;
+    if (status) {
+      runId = cli('code', ['begin', '--seat', 'claude', '--session', owner, '--cwd', repo]).json.runId;
+      common.updateRun(HOME, runId, r => { r.status = status; return r; });
+    }
+    fs.writeFileSync(path.join(repo, 'foreign.txt'), 'foreign work');
+    const identity = common.repoIdentity(repo);
+    const ledger = () => common.loadLedger(HOME, identity.repoKey);
+    common.updateLedger(HOME, identity, l => { l.receipts.push({ commitSha: common.headSha(repo), outcome: 'passed' }); l.approvals.push({ approvalId: 'untouched' }); return l; });
+    const before = ledger(), runBefore = runId && common.loadRun(HOME, runId);
+    assert.equal(hook('claude', 'Stop', hookPayload(sid, repo)).output.decision, 'block');
+    const result = cli('code', ['observe', '--seat', 'claude', '--session', sid, '--cwd', repo, '--reason', 'inspection only; no own unfinished edits']);
+    assert.equal(result.status, 0, result.stderr);
+    assert.equal(hook('claude', 'Stop', hookPayload(sid, repo, { stop_hook_active: true })).note, 'observer acknowledgement consumed');
+    assert.equal(hook('claude', 'Stop', hookPayload(sid, repo)).output.decision, 'block');
+    assert.equal(hook('claude', 'Stop', hookPayload(sid, repo, { stop_hook_active: true })).note, 'stop_hook_active: already blocked this turn');
+    for (const field of ['baselines', 'active', 'receipts', 'approvals', 'deferrals']) assert.deepEqual(ledger()[field], before[field]);
+    if (runId) assert.deepEqual(common.loadRun(HOME, runId), runBefore);
+    assert.equal(ledger().observerAcknowledgements[0].consumed, true);
+    assert.ok(ledger().audit.some(e => e.type === 'observer_acknowledgement_consumed'));
+    assert.ok(common.readStats(HOME).some(e => e.type === 'observer_acknowledgement_consumed' && e.repoKey === identity.repoKey));
+  }
+});
+
+test('observe supports every seat and missing baselines; validates declarations and rejects active owners', () => {
+  const repo = makeRepo(), sid = 'observe-same-id';
+  const identity = common.repoIdentity(repo);
+  const observe = (seat, extra = []) => cli('code', ['observe', '--seat', seat, '--session', sid, '--cwd', repo, '--reason', 'entire session read only', ...extra]);
+  assert.equal(observe('wrong').status, 2);
+  assert.equal(observe('claude', ['--session', '../bad']).status, 2);
+  assert.equal(observe('claude', ['--reason', ' ']).status, 2);
+  assert.equal(observe('claude', ['--cwd', SCRATCH]).status, 2);
+  cli('code', ['begin', '--seat', 'claude', '--session', sid, '--cwd', repo]);
+  assert.equal(observe('claude').status, 2);
+  for (const seat of ['codex', 'cursor', 'opencode']) assert.equal(observe(seat).status, 0);
+  assert.equal(common.loadSession(HOME, 'codex', sid).generation, 0);
+  assert.match(hook('codex', 'Stop', hookPayload(sid, repo)).note, /observer acknowledgement consumed/);
+  const ledger = common.loadLedger(HOME, identity.repoKey);
+  assert.deepEqual(ledger.baselines, {});
+  assert.deepEqual(ledger.deferrals, []); // old hooks only consult deferrals
+});
+
+test('observe replacement, deferral priority, prompt expiry and resume preserve baselines', () => {
+  const repo = makeRepo(), sid = 'observe-lifetime';
+  hook('claude', 'SessionStart', hookPayload(sid, repo));
+  fs.writeFileSync(path.join(repo, 'foreign.txt'), 'foreign');
+  const identity = common.repoIdentity(repo), ledger = () => common.loadLedger(HOME, identity.repoKey);
+  const baseline = ledger().baselines;
+  const observe = () => cli('code', ['observe', '--seat', 'claude', '--session', sid, '--cwd', repo, '--reason', 'read only']).json;
+  const first = observe().acknowledgement.eventId, second = observe().acknowledgement.eventId;
+  assert.notEqual(first, second);
+  assert.equal(ledger().observerAcknowledgements.length, 1);
+  cli('code', ['defer', '--seat', 'claude', '--session', sid, '--cwd', repo, '--reason', 'question checkpoint']);
+  assert.equal(hook('claude', 'Stop', hookPayload(sid, repo)).note, 'deferral consumed');
+  assert.equal(ledger().observerAcknowledgements[0].consumed, false);
+  hook('claude', 'SessionStart', hookPayload(sid, repo, { source: 'resume' }));
+  assert.deepEqual(ledger().baselines, baseline);
+  assert.equal(hook('claude', 'Stop', hookPayload(sid, repo)).note, 'observer acknowledgement consumed');
+  observe();
+  hook('claude', 'UserPromptSubmit', hookPayload(sid, repo));
+  assert.equal(ledger().observerAcknowledgements.length, 0);
+  assert.equal(hook('claude', 'Stop', hookPayload(sid, repo)).output.decision, 'block');
+});
+
+test('observer drift and ownership invalidate permanently without consuming or granting a non-recursive exception', () => {
+  for (const drift of ['head', 'branch', 'fingerprint', 'generation', 'owner']) {
+    const repo = makeRepo(), sid = 'observe-drift';
+    hook('claude', 'SessionStart', hookPayload(sid, repo));
+    fs.writeFileSync(path.join(repo, 'foreign.txt'), 'foreign');
+    const identity = common.repoIdentity(repo), ledger = () => common.loadLedger(HOME, identity.repoKey);
+    assert.equal(cli('code', ['observe', '--seat', 'claude', '--session', sid, '--cwd', repo, '--reason', 'inspection']).status, 0);
+    if (drift === 'head') commitAll(repo, 'foreign commit');
+    if (drift === 'branch') gitc(repo, 'checkout', '-b', 'other');
+    if (drift === 'fingerprint') fs.appendFileSync(path.join(repo, 'foreign.txt'), 'change');
+    if (drift === 'generation') common.updateSession(HOME, 'claude', sid, s => { s.generation++; return s; });
+    if (drift === 'owner') {
+      const begun = cli('code', ['begin', '--seat', 'claude', '--session', sid, '--cwd', repo]).json;
+      common.updateRun(HOME, begun.runId, r => { r.status = 'awaiting_verdict'; return r; });
+    }
+    assert.equal(hook('claude', 'Stop', hookPayload(sid, repo)).output.decision, 'block', drift);
+    const a = ledger().observerAcknowledgements[0];
+    assert.ok(a.invalidatedAt, drift);
+    assert.equal(a.consumed, false);
+    assert.ok(ledger().audit.some(e => e.type === 'observer_acknowledgement_invalidated'));
+    assert.ok(!ledger().audit.some(e => e.type === 'observer_acknowledgement_consumed'));
+    if (drift === 'branch') gitc(repo, 'checkout', 'main');
+    assert.equal(hook('claude', 'Stop', hookPayload(sid, repo)).output.decision, 'block');
+  }
+});
+
+test('observer supports detached HEAD and unchanged pre-existing dirt without replacing the baseline', () => {
+  const repo = makeRepo(), sid = 'observe-preexisting';
+  gitc(repo, 'checkout', '--detach');
+  fs.writeFileSync(path.join(repo, 'preexisting.txt'), 'preexisting');
+  hook('claude', 'SessionStart', hookPayload(sid, repo));
+  const identity = common.repoIdentity(repo), before = common.loadLedger(HOME, identity.repoKey).baselines;
+  assert.equal(cli('code', ['observe', '--seat', 'claude', '--session', sid, '--cwd', repo, '--reason', 'preexisting dirt; inspection only']).status, 0);
+  assert.equal(hook('claude', 'Stop', hookPayload(sid, repo)).note, 'observer acknowledgement consumed');
+  assert.deepEqual(common.loadLedger(HOME, identity.repoKey).baselines, before);
+  assert.equal(common.branchOf(SCRATCH), null);
+  assert.throws(() => common.branchOf(SCRATCH, { strict: true }), /cannot read branch/);
+});
+
+test('observer snapshot errors grant no exception and linked worktrees have independent acknowledgements', () => {
+  const repo = makeRepo(), sid = 'observe-errors';
+  const observe = cwd => cli('code', ['observe', '--seat', 'claude', '--session', sid, '--cwd', cwd, '--reason', 'inspection']);
+  assert.equal(observe(repo).status, 0);
+  const index = path.join(repo, '.git', 'index');
+  fs.renameSync(index, index + '.saved'); fs.mkdirSync(index);
+  try {
+    assert.equal(hook('claude', 'Stop', hookPayload(sid, repo, { stop_hook_active: true })).note, 'stop_hook_active: already blocked this turn');
+    assert.equal(observe(repo).status, 1);
+  } finally { fs.rmdirSync(index); fs.renameSync(index + '.saved', index); }
+  const l = common.loadLedger(HOME, common.repoIdentity(repo).repoKey);
+  assert.ok(l.observerAcknowledgements[0].invalidatedAt);
+  const linked = path.join(SCRATCH, 'observe-linked');
+  gitc(repo, 'worktree', 'add', '-b', 'observe-linked', linked);
+  assert.equal(observe(repo).status, 0);
+  assert.equal(hook('claude', 'Stop', hookPayload(sid, linked)).output.decision, 'block');
+  assert.equal(observe(linked).status, 0);
+  assert.equal(hook('claude', 'Stop', hookPayload(sid, linked)).note, 'observer acknowledgement consumed');
+  assert.equal(hook('claude', 'Stop', hookPayload(sid, repo)).note, 'observer acknowledgement consumed');
+});
+
 test('debate.gitGate=false lets Git commands through while reviews stay on; invalid values keep the gate', () => {
   const repo = makeRepo();
   const sid = 'sess-gitgate-off';

@@ -28,6 +28,7 @@ const HELP = `debate.mjs code — review a local candidate commit with the revie
 
 Usage:
   baseline --cwd <dir> --seat <seat> --session <id> --base <commit> --reason <text>
+  observe --cwd <dir> --seat <seat> --session <id> --reason <text>
   begin --cwd <dir> --seat <seat> --session <id> [--base <commit>]
   begin --cwd <dir> --seat <seat> --session <id> --adopt [--base <commit>] --reason <unpublished-evidence>
   review --run <id> [--detach] [--timeout 30m] [--retry]
@@ -707,6 +708,33 @@ function waiveCommand(flags) {
   printJson({ ok: true, runId: run.runId, outcome: finished.outcome, waivedFrom: waiver.waivedFrom, candidateCommit: finished.code.candidateCommit, waiver, candidateClosed: true, baselineAdvanced: !abandoned, note: abandoned ? 'unchanged candidate abandoned; no review receipt or publication approval was created' : 'a waiver never authorizes a push' });
   return 0;
 }
+function observeCommand(flags) {
+  const home = debateHome();
+  requireWritableHome(home);
+  const seat = validateSeat(flags.seat);
+  const sessionId = sessionIdFor(seat, flags.session);
+  const cwd = resolveCwdArg(flags.cwd);
+  if (!flags.reason || !flags.reason.trim()) throw usage('--reason <text> is required');
+  const identity = identityFor(cwd);
+  updateSession(home, seat, sessionId, s => { s.cwd ||= cwd; return s; });
+  const key = sessionKey(seat, sessionId);
+  let acknowledgement;
+  updateLedger(home, identity, l => {
+    if (l.active?.sessionKey === key) throw usage('active candidate owners must complete their review or use a legitimate checkpoint deferral');
+    const generation = loadSession(home, seat, sessionId).generation;
+    const root = identity.worktreeRoot;
+    const head = headSha(root);
+    if (!head) throw usage('cannot acknowledge a checkout without a readable HEAD');
+    acknowledgement = { eventId: newEventId(), seat, sessionId, sessionKey: key, generation, reason: flags.reason, at: nowIso(), headSha: head, branch: branchOf(root, { strict: true }), fingerprint: startFingerprint(root, { strict: true }), consumed: false };
+    l.observerAcknowledgements = (l.observerAcknowledgements || []).filter(a => a.sessionKey !== key || a.consumed || a.invalidatedAt);
+    l.observerAcknowledgements.push(acknowledgement);
+    auditEvent(l, { type: 'observer_acknowledged', ...acknowledgement });
+    return l;
+  });
+  appendAuditRow(home, { type: 'observer_acknowledged', kind: 'code', repoKey: identity.repoKey, ...acknowledgement });
+  printJson({ ok: true, acknowledgement, declaration: 'This session has no outstanding implementation changes of its own in this worktree, covering the entire session if no baseline exists.', scope: 'one Stop in this prompt generation at this checkout snapshot; no review or publication approval' });
+  return 0;
+}
 function deferCommand(flags) {
   const home = debateHome();
   requireWritableHome(home);
@@ -858,6 +886,7 @@ export function main(argv) {
     case 'verdict': return verdictCommand(flags);
     case 'finish': return finishCommand(flags);
     case 'defer': return deferCommand(flags);
+    case 'observe': return observeCommand(flags);
     case 'waive': return waiveCommand(flags);
     case 'approve-push': return withRepositoryScopeLock(loadRun(debateHome(), validateRunId(flags.run)).cwd, () => approvePushCommand(flags));
     case 'approve-delete': return approveDeleteCommand(flags);
