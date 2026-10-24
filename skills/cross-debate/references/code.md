@@ -4,7 +4,8 @@ Only you communicate with the user. Verify every source finding, including withd
 Never push without explicit candidate-and-destination approval; never amend published history.
 Keep the candidate local throughout review; do not bypass project checks or use --no-verify.
 Commands use your seat (`claude`, `codex`, `cursor` or `opencode`) and a stable session ID.
-Claude and Codex use the hook-provided ID; Cursor and OpenCode choose and reuse one as described in [operations](operations.md#hosts).
+Prefer the native hook-provided ID. Manual workflow tokens on any seat support an explicit originating-session
+binding to the native ID for lifecycle owner checks, as described in [operations](operations.md#session-identities).
 `<cross-debate-dir>` and the scope rules are defined in the skill's SKILL.md. Outside automatic scope, invoke only on
 explicit request; approval requirements still apply even though automatic review and permit guards are inactive.
 The `review` subcommand ([review](review.md)) is the backend; explicit review requests work outside automatic scope.
@@ -44,6 +45,12 @@ completes, reads the result with `code wait --run "<run>" --max-wait 1s`. Every 
    Use your observed commit-without-push history or explicit user confirmation as evidence.
    If publication status is unknown, ask the user before adoption; do not infer it from stale remote refs.
    A parent mismatch must be resolved explicitly; do not rewrite earlier commits to make adoption pass.
+
+   When using a manual workflow token, bind it once to this same originating session's native hook ID:
+   node "<cross-debate-dir>/scripts/debate.mjs" code bind-session --run "<run>" --seat "<seat>" --session "<workflow-id>" --hook-session "<native-id>" --reason "<basis these are the same originating session>"
+   This works on all four seats. Native-ID workflows need no binding. Use the native host session context
+   to find an unknown ID. Caller-aware Git enforcement is a follow-up; never bind an unrelated session.
+   Binding preserves the original workflow IDs for review/resume and is removed when the candidate closes.
 
 3. Active owners must continue their existing candidate. After its commit, use review --run <run>;
    baseline registration is refused while this session owns it. An unchanged-checkout checkpoint still

@@ -1344,6 +1344,107 @@ test('foreign lifecycle details stay advisory across missing baseline, dirty rec
   }
 });
 
+test('explicit native binding on every seat preserves workflow IDs, audits once and closes with the candidate', () => {
+  for (const seat of ['claude', 'codex', 'opencode', 'cursor']) {
+    const repo = makeRepo(), sid = 'manual-token', native = 'native-session';
+    const begun = cli('code', ['begin', '--seat', seat, '--session', sid, '--cwd', repo]).json;
+    if (['opencode', 'cursor'].includes(seat)) assert.match(begun.sessionBinding, /native ID exposed by the host/);
+    const identity = common.repoIdentity(repo), ledger = () => common.loadLedger(HOME, identity.repoKey);
+    const before = common.loadRun(HOME, begun.runId);
+    const args = ['bind-session', '--run', begun.runId, '--seat', seat, '--session', sid, '--hook-session', native, '--reason', 'both IDs identify this originating session'];
+    assert.equal(cli('code', args).json.idempotent, false);
+    assert.equal(cli('code', args).json.idempotent, true);
+    assert.deepEqual(common.loadRun(HOME, begun.runId), before);
+    assert.equal(ledger().active.sessionId, sid);
+    assert.equal(ledger().active.hookSessionId, native);
+    assert.ok(common.ownsCandidate(ledger().active, common.sessionKey(seat, native)));
+    assert.ok(common.ownsCandidate(ledger().active, common.sessionKey(seat, sid)));
+    assert.equal(common.ownsCandidate(ledger().active, common.sessionKey(seat === 'claude' ? 'codex' : 'claude', native)), false);
+    assert.equal(ledger().audit.filter(e => e.type === 'candidate_session_bound').length, 1);
+    assert.ok(common.readStats(HOME).some(e => e.type === 'candidate_session_bound' && e.runId === begun.runId));
+    for (const [flag, value] of [['--hook-session', 'different-native'], ['--hook-session', '../bad'], ['--session', native], ['--seat', seat === 'claude' ? 'codex' : 'claude'], ['--reason', ' '], ['--cwd', makeRepo()]]) {
+      const changed = [...args]; const index = changed.indexOf(flag);
+      if (index < 0) changed.push(flag, value); else changed[index + 1] = value;
+      assert.equal(cli('code', changed).status, 2, `${seat} ${flag}`);
+    }
+    assert.equal(cli('code', ['waive', '--run', begun.runId, '--reason', 'user approved: abandon unchanged test candidate']).status, 0);
+    assert.equal(ledger().active, null);
+    assert.equal(cli('code', args).status, 2);
+  }
+});
+
+test('bound original and native owners share Stop, reminder, baseline and observer restrictions', () => {
+  for (const seat of ['claude', 'codex']) {
+    const repo = makeRepo(), sid = 'workflow-token', native = 'native-owner';
+    const runId = cli('code', ['begin', '--seat', seat, '--session', sid, '--cwd', repo]).json.runId;
+    // A pending observer declaration cannot survive becoming a bound owner.
+    assert.equal(cli('code', ['observe', '--seat', seat, '--session', native, '--cwd', repo, '--reason', 'inspection before binding']).status, 0);
+    const binding = cli('code', ['bind-session', '--run', runId, '--seat', seat, '--session', sid, '--hook-session', native, '--reason', 'same originating session']);
+    assert.equal(binding.status, 0);
+    const before = common.loadRun(HOME, runId);
+    common.updateRun(HOME, runId, r => { r.status = 'awaiting_verdict'; return r; });
+    for (const owner of [sid, native]) {
+      const p = hookPayload(owner, repo);
+      const stop = hook(seat, 'Stop', p);
+      assert.equal(stop.note, 'blocked: verdict required');
+      assert.match(stop.output.reason, /this session/);
+      const reminder = hook(seat, 'UserPromptSubmit', p).output.hookSpecificOutput.additionalContext;
+      assert.match(reminder, new RegExp(`owns active candidate run ${runId}`));
+      assert.equal(cli('code', ['baseline', '--seat', seat, '--session', owner, '--cwd', repo, '--base', common.headSha(repo), '--reason', 'reset']).status, 2);
+      assert.equal(cli('code', ['observe', '--seat', seat, '--session', owner, '--cwd', repo, '--reason', 'cannot be observer']).status, 2);
+    }
+    const l = common.loadLedger(HOME, common.repoIdentity(repo).repoKey);
+    assert.ok(l.audit.some(e => e.type === 'observer_acknowledgement_invalidated'));
+    assert.ok(!l.audit.some(e => e.type === 'observer_acknowledgement_consumed'));
+    assert.equal(common.loadRun(HOME, runId).sessionId, before.sessionId);
+  }
+});
+
+test('existing token runs begun outside scope can bind after enabling scope and preserve aliases through review updates', () => {
+  for (const seat of ['claude', 'codex']) {
+    const repo = makeRepo(undefined, { enrolled: false }), sid = 'pre-scope-token', native = 'now-native';
+    common.changeRepositoryScope(repo, false, HOME);
+    const runId = cli('code', ['begin', '--seat', seat, '--session', sid, '--cwd', repo]).json.runId;
+    fs.writeFileSync(path.join(repo, 'migration.txt'), 'review me'); commitAll(repo, 'migration');
+    common.changeRepositoryScope(repo, true, HOME);
+    assert.equal(cli('code', ['bind-session', '--run', runId, '--seat', seat, '--session', sid, '--hook-session', native, '--reason', 'same original session after enabling scope']).status, 0);
+    const reviewed = cli('code', ['review', '--run', runId], { cli: fakeBackendCli(), env: { TEST_RUN_FILE: path.join(common.runDir(HOME, runId), 'run.json'), TEST_BACKEND_FIXTURE: path.join(FIX, 'backend-clean.json') } });
+    assert.equal(reviewed.json.runStatus, 'awaiting_verdict', reviewed.stdout);
+    assert.equal(common.loadLedger(HOME, common.repoIdentity(repo).repoKey).active.hookSessionId, native);
+    assert.equal(hook(seat, 'Stop', hookPayload(native, repo)).note, 'blocked: verdict required');
+    const verdict = path.join(common.runDir(HOME, runId), 'migration-verdict.json');
+    fs.writeFileSync(verdict, JSON.stringify({ review_rating: 9, verdicts: [], contest_rulings: [], assumptions: [], missed: [], checks: [] }));
+    assert.equal(cli('code', ['verdict', '--run', runId, '--round', '1', '--verdicts', verdict]).status, 0);
+    assert.equal(cli('code', ['finish', '--run', runId]).json.outcome, 'passed');
+    const ledger = common.loadLedger(HOME, common.repoIdentity(repo).repoKey);
+    assert.equal(ledger.baselines[common.sessionKey(seat, native)].headSha, common.headSha(repo));
+    assert.equal(ledger.active, null);
+    assert.equal(hook(seat, 'Stop', hookPayload(native, repo)).output, null);
+  }
+});
+
+test('bound workflow-token deferrals use the native prompt generation and expire on its next prompt', () => {
+  for (const seat of ['claude', 'codex']) {
+    const repo = makeRepo(), sid = 'defer-token', native = 'defer-native';
+    hook(seat, 'SessionStart', hookPayload(native, repo));
+    hook(seat, 'UserPromptSubmit', hookPayload(native, repo));
+    const runId = cli('code', ['begin', '--seat', seat, '--session', sid, '--cwd', repo]).json.runId;
+    assert.equal(cli('code', ['bind-session', '--run', runId, '--seat', seat, '--session', sid, '--hook-session', native, '--reason', 'same originating session']).status, 0);
+    fs.writeFileSync(path.join(repo, 'work.txt'), 'unfinished own work');
+    const defer = session => cli('code', ['defer', '--seat', seat, '--session', session, '--cwd', repo, '--reason', 'question checkpoint']);
+    const d = defer(sid).json.deferral;
+    assert.equal(d.sessionId, native);
+    assert.equal(d.workflowSessionId, sid);
+    assert.equal(d.generation, common.loadSession(HOME, seat, native).generation);
+    assert.equal(hook(seat, 'Stop', hookPayload(native, repo, { stop_hook_active: true })).note, 'deferral consumed');
+    defer(sid);
+    hook(seat, 'UserPromptSubmit', hookPayload(native, repo));
+    assert.equal(hook(seat, 'Stop', hookPayload(native, repo)).output.decision, 'block');
+    assert.equal(defer(native).status, 0);
+    assert.equal(hook(seat, 'Stop', hookPayload(native, repo)).note, 'deferral consumed');
+  }
+});
+
 test('deferral sequence: block, defer, stop_hook_active consumes, next prompt, unreviewed Stop blocks again', () => {
   const repo = makeRepo();
   const sid = 'sess-defer';

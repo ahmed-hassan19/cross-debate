@@ -11,7 +11,7 @@ import { spawnSync } from 'node:child_process';
 import {
   RUN_SCHEMA, MAX_ROUNDS, CODE_REVIEW_LANES, SHA_RE, usage, nowIso, log, printJson, isPidAlive, sleepMs, newEventId,
   debateHome, ensureHome, requireWritableHome, readJsonIfExists, createRun, loadRun, updateRun, runDir,
-  loadSession, updateSession, loadLedger, updateLedger, auditEvent, validateSeat, sessionIdFor, sessionKey, validateRunId,
+  loadSession, updateSession, loadLedger, updateLedger, auditEvent, validateSeat, sessionIdFor, sessionKey, ownsCandidate, validateSessionId, validateRunId,
   resolveCwdArg, parseDuration, git, gitText, repoIdentity, headSha, emptyTreeSha, resolveCommit, treeOf, parentsOf, branchOf, isAncestor,
   commitsInRange as listCommits, startFingerprint, porcelainStatus, hasUnmerged, hasHiddenIndexBits, dirtySubmodules,
   remoteContains, remotePushUrls, remoteIsMirror, pushCommand, deleteCommand, githubRepoFromUrl, candidateStateFor, scanDiffForSecrets, SEATS, CLI, cliCommand,
@@ -29,6 +29,7 @@ const HELP = `debate.mjs code — review a local candidate commit with the revie
 Usage:
   baseline --cwd <dir> --seat <seat> --session <id> --base <commit> --reason <text>
   observe --cwd <dir> --seat <seat> --session <id> --reason <text>
+  bind-session --run <id> --seat <seat> --session <workflow-id> --hook-session <native-id> --reason <text>
   begin --cwd <dir> --seat <seat> --session <id> [--base <commit>]
   begin --cwd <dir> --seat <seat> --session <id> --adopt [--base <commit>] --reason <unpublished-evidence>
   review --run <id> [--detach] [--timeout 30m] [--retry]
@@ -138,7 +139,7 @@ function baselineCommand(flags) {
   const record = baselineRecord({ seat, sessionId, root, headSha: base, source: 'explicit', reason: flags.reason });
   let event;
   updateLedger(home, identity, (l) => {
-    if (l.active?.sessionKey === key) throw usage(`this session owns active candidate ${l.active.runId}; continue its review instead of resetting the baseline`);
+    if (ownsCandidate(l.active, key)) throw usage(`this session owns active candidate ${l.active.runId}; continue its review instead of resetting the baseline`);
     l.baselines[key] = record;
     event = auditEvent(l, { type: 'baseline_registered', seat, sessionId, headSha: base, currentHead: head, reason: flags.reason, eventId: record.eventId });
     return l;
@@ -235,7 +236,7 @@ function beginCommand(flags) {
   const session = updateSession(home, seat, sessionId, (s) => { s.codeRuns.push(run.runId); s.cwd = s.cwd || cwd; return s; });
   if (run.code.adopted) appendAuditRow(home, { type: 'candidate_adopted', eventId: newEventId(), kind: 'code', runId: run.runId, seat, sessionId, generation: session.generation, repoKey: identity.repoKey, baseSha: run.code.baseSha, candidateCommit: head, commitsInRange: run.code.commitsInRange, reason: flags.reason, at: nowIso() });
   upsertStatsRow(home, statsRowFromRun(run));
-  printJson({ ok: true, runId: run.runId, status: run.code.phase, baseSha: run.code.baseSha, branch, candidateCommit: run.code.candidateCommit, adopted: run.code.adopted, commitsInRange: run.code.commitsInRange, worktreeRoot: root, repoKey: identity.repoKey, baselineForSession: baselineFor(existing, key) ? baselineFor(existing, key).headSha : null, warnings: run.warnings, next: run.code.adopted ? 'review --run <id>' : 'git add -A; git commit -m "<type>: <description>" (separate tool calls), then review --run <id>' });
+  printJson({ ok: true, runId: run.runId, status: run.code.phase, baseSha: run.code.baseSha, branch, candidateCommit: run.code.candidateCommit, adopted: run.code.adopted, commitsInRange: run.code.commitsInRange, worktreeRoot: root, repoKey: identity.repoKey, baselineForSession: baselineFor(existing, key) ? baselineFor(existing, key).headSha : null, warnings: run.warnings, ...(['opencode', 'cursor'].includes(seat) ? { sessionBinding: 'Use the native hook session ID directly, or explicitly bind this manual token with code bind-session --run <id> --seat <seat> --session <workflow-id> --hook-session <native-id> --reason <basis>. Use the native ID exposed by the host; binding currently enables lifecycle owner checks, with caller-aware Git enforcement to follow.' } : {}), next: run.code.adopted ? 'review --run <id>' : 'git add -A; git commit -m "<type>: <description>" (separate tool calls), then review --run <id>' });
   return 0;
 }
 
@@ -612,8 +613,11 @@ function closeCandidate(home, run, identity, outcome, extra = {}) {
     if (recorded && !owns) return l;
     if (!recorded) l.receipts.push({ runId: run.runId, sessionKey: key, seat: run.seat, sessionId: run.sessionId, commitSha: run.code.candidateCommit, treeId: run.code.candidateTree, baseSha: run.code.baseSha, outcome, finishedAt: run.finishedAt, ...extra });
     if (TERMINAL_OUTCOMES.has(outcome) && owns) {
+      const native = l.active.hookSessionId;
+      const record = { seat: run.seat, root: identity.worktreeRoot, headSha: run.code.candidateCommit, source: outcome === 'waived' ? 'waive' : 'finish', runId: run.runId };
+      l.baselines[key] = baselineRecord({ ...record, sessionId: run.sessionId });
+      if (native && native !== run.sessionId) l.baselines[l.active.hookSessionKey] = baselineRecord({ ...record, sessionId: native });
       l.active = null;
-      l.baselines[key] = baselineRecord({ seat: run.seat, sessionId: run.sessionId, root: identity.worktreeRoot, headSha: run.code.candidateCommit, source: outcome === 'waived' ? 'waive' : 'finish', runId: run.runId });
     }
     auditEvent(l, { type: outcome === 'waived' ? 'candidate_waived' : 'candidate_finished', runId: run.runId, seat: run.seat, sessionId: run.sessionId, outcome, commitSha: run.code.candidateCommit });
     return l;
@@ -709,6 +713,33 @@ function waiveCommand(flags) {
   printJson({ ok: true, runId: run.runId, outcome: finished.outcome, waivedFrom: waiver.waivedFrom, candidateCommit: finished.code.candidateCommit, waiver, candidateClosed: true, baselineAdvanced: !abandoned, note: abandoned ? 'unchanged candidate abandoned; no review receipt or publication approval was created' : 'a waiver never authorizes a push' });
   return 0;
 }
+function bindSessionCommand(flags) {
+  const home = debateHome();
+  requireWritableHome(home);
+  const seat = validateSeat(flags.seat);
+  const sessionId = sessionIdFor(seat, flags.session);
+  const hookSessionId = validateSessionId(flags.hookSession);
+  if (!flags.reason || !flags.reason.trim()) throw usage('--reason <text> is required');
+  const run = loadRun(home, validateRunId(flags.run));
+  if (run.kind !== 'code' || run.seat !== seat || run.sessionId !== sessionId) throw usage('binding requires the run original seat/session; this declares the same originating session, not a transfer');
+  const identity = requireRunIdentity(run);
+  if (flags.cwd && identityFor(resolveCwdArg(flags.cwd)).repoKey !== identity.repoKey) throw usage('binding requires the same worktree');
+  let event;
+  const ledger = updateLedger(home, identity, l => {
+    if (l.active?.runId !== run.runId || l.active.sessionKey !== sessionKey(seat, sessionId)) throw usage('binding requires the still-active original candidate');
+    if (l.active.hookSessionId) {
+      if (l.active.hookSessionId !== hookSessionId) throw usage('active candidate already has a conflicting native session binding');
+      return l;
+    }
+    l.active.hookSessionId = hookSessionId;
+    l.active.hookSessionKey = sessionKey(seat, hookSessionId);
+    event = auditEvent(l, { type: 'candidate_session_bound', runId: run.runId, seat, sessionId, hookSessionId, reason: flags.reason });
+    return l;
+  });
+  if (event) appendAuditRow(home, { ...event, kind: 'code', repoKey: identity.repoKey });
+  printJson({ ok: true, runId: run.runId, sessionId, hookSessionId: ledger.active.hookSessionId, idempotent: !event, declaration: 'Both IDs identify this same originating session; original workflow and recovery IDs are unchanged.' });
+  return 0;
+}
 function observeCommand(flags) {
   const home = debateHome();
   requireWritableHome(home);
@@ -721,7 +752,7 @@ function observeCommand(flags) {
   const key = sessionKey(seat, sessionId);
   let acknowledgement;
   updateLedger(home, identity, l => {
-    if (l.active?.sessionKey === key) throw usage('active candidate owners must complete their review or use a legitimate checkpoint deferral');
+    if (ownsCandidate(l.active, key)) throw usage('active candidate owners must complete their review or use a legitimate checkpoint deferral');
     const generation = loadSession(home, seat, sessionId).generation;
     const root = identity.worktreeRoot;
     const head = headSha(root);
@@ -750,14 +781,18 @@ function deferCommand(flags) {
   const deferral = { eventId: newEventId(), sessionKey: key, seat, sessionId, generation, reason: flags.reason, at: nowIso(), consumed: false, consumedAt: null };
   let activeRun = null;
   updateLedger(home, identity, (l) => {
-    l.deferrals = l.deferrals.filter(d => !(d.sessionKey === key && !d.consumed));
+    if (l.active?.sessionKey === key && l.active.hookSessionId) {
+      const native = l.active.hookSessionId;
+      Object.assign(deferral, { workflowSessionId: sessionId, workflowSessionKey: key, sessionId: native, sessionKey: l.active.hookSessionKey, generation: loadSession(home, seat, native)?.generation ?? 0 });
+    }
+    l.deferrals = l.deferrals.filter(d => !(d.sessionKey === deferral.sessionKey && !d.consumed));
     l.deferrals.push(deferral);
-    auditEvent(l, { type: 'deferral', seat, sessionId, generation, reason: flags.reason, eventId: deferral.eventId });
-    if (l.active && l.active.sessionKey === key) activeRun = l.active.runId;
+    auditEvent(l, { type: 'deferral', ...deferral });
+    if (ownsCandidate(l.active, key)) activeRun = l.active.runId;
     return l;
   });
-  if (activeRun) { try { const run = updateRun(home, activeRun, (r) => { r.operations.deferrals.push({ eventId: deferral.eventId, generation, reason: flags.reason, at: deferral.at }); return r; }); upsertStatsRow(home, statsRowFromRun(run)); } catch (e) { log(`could not record deferral on run ${activeRun}: ${e.message}`); } }
-  appendAuditRow(home, { type: 'deferral', eventId: deferral.eventId, kind: 'code', runId: activeRun, seat, sessionId, generation, repoKey: identity.repoKey, reason: flags.reason, at: deferral.at });
+  if (activeRun) { try { const run = updateRun(home, activeRun, (r) => { r.operations.deferrals.push({ eventId: deferral.eventId, generation: deferral.generation, reason: flags.reason, at: deferral.at }); return r; }); upsertStatsRow(home, statsRowFromRun(run)); } catch (e) { log(`could not record deferral on run ${activeRun}: ${e.message}`); } }
+  appendAuditRow(home, { type: 'deferral', ...deferral, kind: 'code', runId: activeRun, repoKey: identity.repoKey });
   printJson({ ok: true, deferral, scope: 'this prompt generation only; consumed by the next Stop', note: 'a deferral cannot accompany a completion claim and never permits a push' });
   return 0;
 }
@@ -874,7 +909,7 @@ export function main(argv) {
   if (!cmd || cmd === '--help' || cmd === '-h') { process.stdout.write(HELP); return cmd ? 0 : 2; }
   const { flags } = parseArgs(argv.slice(1), {
     booleans: ['adopt', 'detach', 'retry', 'json'],
-    values: ['cwd', 'seat', 'session', 'base', 'reason', 'run', 'timeout', 'maxWait', 'round', 'verdicts', 'remote', 'ref', 'kind', 'since', 'attempt', 'mainLane', 'debateLane', 'selfReview', 'pr'],
+    values: ['cwd', 'seat', 'session', 'base', 'reason', 'run', 'timeout', 'maxWait', 'round', 'verdicts', 'remote', 'ref', 'kind', 'since', 'attempt', 'mainLane', 'debateLane', 'selfReview', 'pr', 'hookSession'],
   });
   if (flags.help) { process.stdout.write(HELP); return 0; }
   ensureHome(debateHome());
@@ -888,6 +923,7 @@ export function main(argv) {
     case 'finish': return finishCommand(flags);
     case 'defer': return deferCommand(flags);
     case 'observe': return observeCommand(flags);
+    case 'bind-session': return bindSessionCommand(flags);
     case 'waive': return waiveCommand(flags);
     case 'approve-push': return withRepositoryScopeLock(loadRun(debateHome(), validateRunId(flags.run)).cwd, () => approvePushCommand(flags));
     case 'approve-delete': return approveDeleteCommand(flags);

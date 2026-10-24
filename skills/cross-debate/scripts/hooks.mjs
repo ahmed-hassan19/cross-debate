@@ -7,7 +7,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import {
   SESSION_RE, SHELLS, SKILL_DIR, usage, nowIso, log, newEventId, debateHome, ensureHome, automationOff, readStdin, cliCommand,
-  loadRun, loadSession, updateSession, loadLedger, updateLedger, auditEvent, sessionKey, repoIdentity, headSha, emptyTreeSha, branchOf,
+  loadRun, loadSession, updateSession, loadLedger, updateLedger, auditEvent, sessionKey, ownsCandidate, repoIdentity, headSha, emptyTreeSha, branchOf,
   startFingerprint, porcelainStatus, splitPlan, planPathFromTranscript, extractProposedPlan, gitGateDecision, isPidAlive,
   repositoryScope, worktreeRoots, treeOf, git, appendAuditRow,
 } from './lib/common.mjs';
@@ -111,7 +111,7 @@ function onUserPromptSubmit({ host, seat, sessionId, cwd, input, home, gitOpts }
       if (l.observerAcknowledgements) l.observerAcknowledgements = l.observerAcknowledgements.filter(a => !(a.sessionKey === key && a.generation < session.generation));
       return l;
     });
-    if (ledger.active && ledger.active.sessionKey === key) active = ledger.active;
+    if (ownsCandidate(ledger.active, key)) active = ledger.active;
   }
   const planMode = input.permissionMode === 'plan';
   if (!host.remindAlways) {
@@ -187,7 +187,7 @@ function repositoryReceipts(home, root, gitOpts) {
 
 /** Give the Stop hook lifecycle-aware guidance for the active code candidate. */
 function activeCodeRunHint(home, active, sessionKeyValue, head, includePending = false) {
-  if (!active?.runId || active.sessionKey !== sessionKeyValue) return null;
+  if (!active?.runId || !ownsCandidate(active, sessionKeyValue)) return null;
   let run;
   try { run = loadRun(home, active.runId); } catch { return null; }
   if (!run || run.kind !== 'code') return null;
@@ -277,7 +277,7 @@ function codeStopGate({ seat, sessionId, cwd, input, home, gitOpts }) {
       if (!a) return l;
       let valid = false;
       try {
-        valid = l.active?.sessionKey !== key && a.generation === (loadSession(home, seat, sessionId)?.generation ?? 0)
+        valid = !ownsCandidate(l.active, key) && a.generation === (loadSession(home, seat, sessionId)?.generation ?? 0)
           && a.headSha === headSha(root, gitOpts) && a.branch === branchOf(root, { ...gitOpts, strict: true }) && a.fingerprint === startFingerprint(root, { ...gitOpts, strict: true });
       } catch { /* an unreadable snapshot grants no exception */ }
       if (valid) { a.consumed = true; a.consumedAt = nowIso(); }
@@ -292,7 +292,7 @@ function codeStopGate({ seat, sessionId, cwd, input, home, gitOpts }) {
   const head = headSha(root, gitOpts);
   if (!head) return { output: null, note: 'unborn HEAD' };
   const active = ledger?.active;
-  const owns = active?.sessionKey === key;
+  const owns = ownsCandidate(active, key);
   const activeHint = activeCodeRunHint(home, active, key, head);
   if (activeHint) return { output: block(`debate-code: ${activeHint.reason}`), note: activeHint.note };
   const existingCandidate = () => {

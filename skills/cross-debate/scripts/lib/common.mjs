@@ -167,6 +167,10 @@ export function sessionIdFor(seat, explicit) {
   throw usage('--session is required (no validated session id in the environment)');
 }
 export function sessionKey(seat, sessionId) { return `${seat}-${sha256(seat, '\0', sessionId).slice(0, 32)}`; }
+/** Workflow identity and an explicitly bound native alias denote the same originating session. */
+export function ownsCandidate(active, key) {
+  return Boolean(active && (active.sessionKey === key || active.hookSessionKey === key));
+}
 export function validateRunId(runId) {
   if (typeof runId !== 'string' || !UUID_RE.test(runId)) throw usage('invalid --run id');
   return runId;

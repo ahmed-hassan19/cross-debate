@@ -36,6 +36,33 @@ Literal `cd` and `git -C` targets determine mutation scope, not the starting she
 
 The `review` command is the backend invoked by `code review`. Automatic use comes through the Git default; explicit plan, code, or review requests remain supported outside automatic scope. Invoking a skill does not write Git config.
 
+## Session identities
+
+Prefer each host's native session ID. For a manual token on any supported seat, explicitly declare that
+it and the native hook ID identify the same originating session, using the run's original seat/token:
+
+```sh
+node "<cross-debate-dir>/scripts/debate.mjs" code bind-session --run "<run>" --seat "<seat>" --session "<workflow-id>" --hook-session "<native-id>" --reason "<basis these are the same originating session>"
+```
+
+No per-use user approval is needed for this honor-based declaration. Binding is audited, requires the
+same still-active worktree/candidate, and does not transfer ownership. Repeating an identical binding is
+idempotent; a conflicting native binding is rejected while active. Run files, receipts and the original
+review/resume IDs stay unchanged. Stop, reminders, baseline and observe recognize either identity.
+Binding enables lifecycle owner checks; caller-aware Git enforcement is a separate follow-up. Same raw IDs on different seats remain distinct.
+Native-ID workflows need no binding. OpenCode/Cursor begin output announces this path; use native host
+session context for an unknown ID. Caller-aware denial guidance belongs to the follow-up Git guard.
+Workflow-token checkpoint deferrals target the bound native session and its current prompt generation,
+retaining the original workflow identity in audit metadata. A terminal finish/waiver advances both owner
+baselines before removing the alias with active state. Never bind an unrelated concurrent session to clear a denial.
+
+| Host | Shell Git gate | Stop/plan hooks | Observe passage | Explicit binding |
+|---|---|---|---|---|
+| Claude | Yes | Yes | Yes | Yes |
+| Codex | Yes, trusted hooks | Yes, trusted hooks | Yes | Yes |
+| OpenCode | Yes, experimental | No | CLI only | Yes |
+| Cursor | Yes, experimental | No | CLI only | Yes |
+
 ## Reviewer failure and recovery
 
 A code finish with outcome `blocked` keeps the candidate active and can continue before round 3 with an amendment that changes the tree followed by `review --run <run>`; at round 3, `exhausted_with_blockers` requires an explicitly approved waiver to close.
@@ -121,7 +148,7 @@ The offline suite exercises every host adapter, lifecycle gates, scope transitio
 
 `setup hooks --agent <host>` prints the exact entries; `setup doctor` reports which are installed. Every hook runs `debate.mjs hook <host> <event>`, exits 0 on internal errors (fail open), and passes unmapped events through. Claude reminds only in plan mode or while it owns an active candidate; Codex receives a plan or code instruction on every prompt.
 
-On Cursor and OpenCode, invoke the plan and code workflows yourself with `--seat cursor` or `--seat opencode`. Their hooks do not provide the agent with a session ID. Use the actual host session ID if available and valid, or choose a unique token for this task, such as `review-20261002-task`. A valid ID has 1–128 characters, starts with a letter or number, and contains only ASCII letters, numbers, `.`, `_`, `:` or `-`. Reuse that exact value for every `--session` in the task's plan and code commands, including `baseline`, `defer` and `resume`; resume requires the original seat and session. Outside automatic scope, Claude and Codex can also choose a token for an explicit review when no native session ID is available.
+On Cursor and OpenCode, invoke the plan and code workflows yourself with `--seat cursor` or `--seat opencode`. Their hooks do not provide the agent with a session ID. Use the actual host session ID if available and valid, or choose a unique token for this task, such as `review-20261002-task`. A valid ID has 1–128 characters, starts with a letter or number, and contains only ASCII letters, numbers, `.`, `_`, `:` or `-`. For a manual code token, bind it to the native ID with `code bind-session` as described in [Session identities](#session-identities); use native host session context to discover an unknown ID. Reuse the original workflow value for every `--session` in the task's plan and code commands, including `baseline`, `defer` and `resume`; resume requires the original seat and session. Outside automatic scope, Claude and Codex can also choose a token for an explicit review when no native session ID is available.
 
 ## Removal
 
