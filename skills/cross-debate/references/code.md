@@ -116,6 +116,9 @@ completes, reads the result with `code wait --run "<run>" --max-wait 1s`. Every 
    Fix confirmed blockers with the smallest complete change. Leave non-blocking findings recorded as advisories
    unless the user asks for the fix. Do not add speculative capabilities or abstractions for future requirements.
    Preserve safeguards needed for current contracts and supported failure scenarios.
+   When a later round reveals the same violated invariant after a fix, inspect the shared path and its supported
+   variants before patching again. Choose the smallest complete fix and test the affected family. Follow the
+   current contract for unresolved inputs or outcomes.
    Rerun project checks; use separate shell calls:
    git add -A
    git commit --amend --no-edit
