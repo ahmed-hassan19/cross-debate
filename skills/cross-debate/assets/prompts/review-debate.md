@@ -20,16 +20,18 @@ files anywhere, including temp directories; do not run tests or builds. Return e
 Default to skepticism in both directions. The three verdicts are not symmetric. `refute` has the
 highest bar.
 
+- Apply the blocking definition supplied in the schema below to verdicts and new findings.
 - `refute` only when the refutation is constructible from the code. The claim is factually wrong
   (quote the actual line). It is provably impossible (show the type, constant, or invariant). It is
-  already guarded in this diff (cite the guard). Or it has no observable effect.
-- `downgrade` when the defect is real but severity or confidence is overstated. That includes realistic
-  but unverified state (a race, nil on a rare but reachable path, a cold cache, an absent optional
-  field) when the finding was written as always-on or blocking.
+  fully guarded (cite the guard). Or no evidence-backed trigger remains (name the unsupported premise).
+- `downgrade` when severity, confidence, or a suggestion needs correction; name which one. Lower
+  severity only when the remaining defect falls below the blocking bar. For a confidence-only
+  concession, preserve justified severity while an evidence-backed trigger remains. A partially
+  effective guard leaves the residual defect to assess under the same bar.
 - `confirm` when you traced the path yourself and it holds. Realistic runtime state you cannot disprove
   from the code is not grounds to refute. On a finding that carries a `suggestion`, `confirm` also means
   the replacement text is correct as written; if the defect is real but the replacement is wrong, use
-  `downgrade` and say why.
+  `downgrade` to flag the suggestion only, preserve justified severity, and request `"suggestion": null`.
 
 Do not refute a finding for being speculative or "dependent on runtime state" when that state is
 realistic. Re-read the code. Do not treat the finding's quoted evidence as proof that the line says
@@ -51,7 +53,7 @@ that flipped. Those are places to look, not new categories: a finding there stil
   settles it, run it and quote the command and output. A refutation without evidence is a downgrade.
 - Do not invent files, lines, or runtime behaviour. If a conclusion rests on an inference, say so and
   keep the confidence honest.
-- Material only. No style, naming, or cleanup.
+- Assess impact under the supplied blocking definition. No style, naming, or cleanup.
 - New finding ids are `D1`, `D2`, and so on. Same shape as the findings under review.
 
 ## Before you emit

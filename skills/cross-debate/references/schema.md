@@ -37,8 +37,10 @@ reorder them or add a `##` heading above section 3.
 - `line_start` and `line_end` must be lines on the new side of the PR diff, because GitHub can only
   anchor comments there. If the problem is outside the diff, anchor the nearest changed line
   and say so in `evidence`.
-- `severity` follows babysit-pr. Blocking means it ships a defect, a security or data exposure, a spec
-  violation, a migration hazard, or a failing check. Everything else is non-blocking.
+- Blocking requires an evidence-backed, reachable trigger and a material failure of current requirements
+  or safety guarantees. A real defect that is rare in supported use and low in impact is non-blocking.
+  Rarity alone never makes authorization bypass, sensitive-data exposure, incorrect financial operations,
+  or irreversible data loss non-blocking.
 - `confidence` is 0 to 1. Findings under `min_confidence` (default 0.5) are dropped before debate.
 - `efficiency` findings are always non-blocking. The script turns a blocking one non-blocking, drops one
   from the debate reviewer's `new_findings`, and records a warning in the run log.
@@ -61,7 +63,17 @@ reorder them or add a `##` heading above section 3.
 ```
 
 - Every `F*` id gets exactly one explicit verdict. A missing verdict fails the review; silence never counts as confirmation.
-- `downgrade` means the defect is real but severity or confidence was overstated.
+- Blocking requires an evidence-backed, reachable trigger and a material failure of current requirements
+  or safety guarantees. A real defect that is rare in supported use and low in impact is non-blocking.
+  Rarity alone never makes authorization bypass, sensitive-data exposure, incorrect financial operations,
+  or irreversible data loss non-blocking.
+- `refute` when a guard eliminates the alleged defect or no evidence-backed trigger remains. Name the
+  guard or unsupported premise; an accepted refutation calls for withdrawal in the final pass.
+- `downgrade` can correct severity, confidence, or a suggestion; state which correction is justified.
+  Lower severity only when the remaining defect falls below the blocking bar. A confidence-only
+  concession preserves justified severity while an evidence-backed trigger remains. If the defect
+  remains blocking but its suggested patch is wrong, preserve blocking severity and flag the invalid
+  suggestion for suppression in the final pass.
 - `refute` must carry evidence. A bare "I disagree" is recorded but weighted as `downgrade`.
 - `new_findings` is a gap sweep, not a second review. Blocking only, with a named trigger. Entries
   below `min_confidence` are dropped the same way the main findings are. Zero new findings is the
@@ -87,10 +99,21 @@ reorder them or add a `##` heading above section 3.
 }
 ```
 
-- `agreed`: both models stand behind it. Posted.
-- `contested`: the debate reviewer refuted it and the main reviewer holds, with evidence. Posted with a
-  `contested` tag, or dropped with `--contested drop`.
-- `withdrawn`: the main reviewer accepts the refutation. Never posted, kept in the run log.
+- Blocking requires an evidence-backed, reachable trigger and a material failure of current requirements
+  or safety guarantees. A real defect that is rare in supported use and low in impact is non-blocking.
+  Rarity alone never makes authorization bypass, sensitive-data exposure, incorrect financial operations,
+  or irreversible data loss non-blocking.
+- `agreed`: the defect is retained, including an accepted or rejected severity downgrade. An accepted
+  severity downgrade changes severity; a rejected one keeps justified severity and explains the
+  disagreement in `debate_note`. Both remain eligible for posting under `--contested drop`.
+- `contested`: only an `F*` held against an evidenced refutation. Posted with a `contested` tag, or
+  dropped with `--contested drop`. A severity, confidence, or suggestion disagreement alone is not contested.
+- `withdrawn`: a guard eliminates the alleged defect or no evidence-backed trigger remains. Name the
+  guard or unsupported premise in `debate_note`. Never posted, kept in the run log.
+- A confidence-only concession preserves justified severity while the blocking bar still holds; explain
+  it in `debate_note`. The final schema has no confidence field; do not invent a numeric confidence update.
+- An accepted suggestion-only correction preserves justified severity and sets `"suggestion": null`
+  when the original replacement is invalid. A wrong patch does not make a blocking defect non-blocking.
 - `D*` findings can only end as `agreed` or `withdrawn`. A `D*` the main reviewer rejects with evidence
   is `withdrawn` with the objection in `debate_note`. It is never `contested`, so a rejected claim from
   the second model is never posted. A `D*` that duplicates an `F*` is `withdrawn` with `debate_note`

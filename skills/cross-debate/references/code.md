@@ -113,7 +113,10 @@ completes, reads the result with `code wait --run "<run>" --max-wait 1s`. Every 
    Do not retry deterministic preflight errors as model failures.
 
 6. Validate every main/debate finding against the candidate, regardless of final agreed/contested/withdrawn status.
-   Fix confirmed blockers; rerun project checks; use separate shell calls:
+   Fix confirmed blockers with the smallest complete change. Leave non-blocking findings recorded as advisories
+   unless the user asks for the fix. Do not add speculative capabilities or abstractions for future requirements.
+   Preserve safeguards needed for current contracts and supported failure scenarios.
+   Rerun project checks; use separate shell calls:
    git add -A
    git commit --amend --no-edit
    Every correction in this loop amends the same candidate and preserves its parent.
@@ -155,8 +158,9 @@ completes, reads the result with `code wait --run "<run>" --max-wait 1s`. Every 
 
    - **Changed:** summarize the implementation, identify the candidate SHA, and state publication status.
    - **Found:** state the actual review outcome, relevant checks, and verified unresolved findings. Include
-     skipped checks, limitations, and required failure, waiver, and unreviewed-change warnings; never describe
-     waived or unreviewed content as passed.
+     retained advisories from the existing run history/report without creating issues or promising follow-up.
+     Include skipped checks, limitations, and required failure, waiver, and unreviewed-change warnings; never
+     describe waived or unreviewed content as passed.
    - **Blocked on me:** name specific user decisions or approvals needed; write **None for this task** when
      none are needed. For a local candidate, also state that it remains local and that pushing or releasing
      it would require explicit user approval. When publication is required by the task, replace that note

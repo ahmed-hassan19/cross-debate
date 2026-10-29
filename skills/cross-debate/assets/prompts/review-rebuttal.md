@@ -15,12 +15,22 @@ temp directories; do not run tests or builds. Return exactly one fenced ```json 
 {{DEBATE_JSON}}
 
 ## Rules
+- Apply the blocking definition supplied in the schema below to every retained finding.
 - Re-read the code for every `refute` and `downgrade` before deciding.
   - `withdrawn` requires a positive reason of your own. Name the line, guard, type, invariant, or spec
-    clause that makes the original claim wrong, and put it in `debate_note`. "Position B disagreed" is
-    not a reason. Neither is the absence of a counter-argument.
-  - If the challenge is wrong and you can show why, use `contested`, with the why in `debate_note`.
-  - Accept a valid `downgrade` by changing `severity` and marking `agreed`.
+    clause that eliminates the alleged defect, or name the unsupported premise when no evidence-backed
+    trigger remains, and put it in `debate_note`. "Position B disagreed" is not a reason. Neither is
+    the absence of a counter-argument.
+  - Use `contested` only for an `F*` held against an evidenced refutation, with your evidence in
+    `debate_note`. A severity, confidence, or suggestion disagreement alone remains `agreed`.
+  - Accept a valid severity downgrade by changing `severity` and marking `agreed`. Reject an invalid
+    severity downgrade by keeping justified severity and `agreed`, explaining why in `debate_note`.
+    Both remain eligible for posting under `--contested drop`.
+  - A confidence-only concession keeps justified severity while the blocking bar still holds; explain
+    the concession in `debate_note`. The final schema has no confidence field. If no evidence-backed
+    trigger remains, withdraw and name the unsupported premise.
+  - An accepted suggestion-only correction keeps justified severity and sets `"suggestion": null`
+    when invalid. Preserve blocking severity when the defect is blocking but its suggested patch is wrong.
   - If every challenge really does collapse, withdraw them all. Do not keep a finding in order to
     have kept one.
 - For each `D*`, apply the same bar as any finding. This diff introduced it (or it sits on an unchanged

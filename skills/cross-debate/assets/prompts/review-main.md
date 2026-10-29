@@ -51,8 +51,9 @@ block matching `debate-review.findings.v1` (schema below) and nothing after it.
 You are reviewing for precision. The passes above find candidates. Only candidates that clear this
 bar become findings.
 
+- Apply the blocking definition supplied in the schema below.
 - Report a finding only if all of these hold:
-  1. It materially affects one of the axes above.
+  1. It identifies a real defect on one of the axes above.
   2. It is one discrete, actionable defect at one location.
   3. Fixing it does not demand more rigour than the rest of this codebase already shows.
   4. This diff introduced it, or it sits on an unchanged line of a function this PR touches, or it is
