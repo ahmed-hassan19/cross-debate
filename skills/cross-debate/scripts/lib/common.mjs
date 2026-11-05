@@ -932,7 +932,7 @@ function consumeApproval(home, identity, approval, eventType, denyDefault) {
 
 // ---------- relays and lanes ----------
 
-// Installed delegate-skills win so a relay pairs with its own delegate-setup; the pinned vendor copy is the fallback.
+// Bundled delegate-skills serve relays and lane validation unless DELEGATE_SKILLS_DIR explicitly overrides them.
 export const VENDOR_SKILLS_DIR = path.join(SKILL_DIR, 'vendor', 'delegate-skills');
 /**
  * The bundled, pinned delegate-skills copy always serves the relays and lane validator, so an installed

@@ -5,7 +5,7 @@ This skill bundles and adapts MIT-licensed code. Each upstream license is reprod
 ## delegate-skills
 
 - Source: https://github.com/amElnagdy/delegate-skills
-- Pinned commit: `312a234fed363537920708bc38a88fbbc8755175`
+- Pinned commit: `7f8ae3435e5bc68a54efdca9f67797e905845562`
 - Bundled unmodified under `vendor/delegate-skills/`:
   - `claude-delegate/scripts/relay.mjs`
   - `codex-delegate/scripts/relay.mjs`

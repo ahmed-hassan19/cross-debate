@@ -35,6 +35,7 @@
  *     | { static: readonly string[] },
  *   usageProbe: null | {
  *     envDir?: string,
+ *     envSubdir?: string,
  *     homeSubdir: string,
  *     path: readonly string[],
  *     entry: "file"|"dir"|"any",
@@ -134,6 +135,30 @@ export const IMPLEMENTERS = Object.freeze([
     winShell: false,
   },
   {
+    key: "mcode",
+    skill: "mcode-delegate",
+    // The official installer puts mcode in ~/.minimax-code/bin, which only a shell profile adds
+    // to PATH; MCODE_CLI names it explicitly, the same override the relay honours.
+    binary: "mcode",
+    versionArgs: ["--version"],
+    // No headless sign-in status command, and `mcode provider list` returns no model ids for the
+    // managed MiniMax providers, so auth and models stay unknown rather than guessed.
+    authProbe: null,
+    modelProbe: null,
+    // <data-dir>/v2/sessions/<yyyy>/<mm>/<dd>/<time>-session_<id>/ — one directory per session.
+    usageProbe: {
+      envDir: "MINIMAX_DATA_DIR",
+      homeSubdir: ".minimax",
+      path: ["v2", "sessions", "*", "*", "*"],
+      entry: "dir",
+      match: /-session_/,
+    },
+    // No sandbox or permissionMode dial: --permission smart|full is a per-dispatch choice, and
+    // readOnly is advisory (a prompt plus the relay tripwire).
+    supports: ["model", "effort", "timeout", "readOnly"],
+    winShell: true,
+  },
+  {
     key: "opencode",
     skill: "opencode-delegate",
     binary: "opencode",
@@ -204,6 +229,30 @@ export const IMPLEMENTERS = Object.freeze([
       match: /^session_/,
     },
     supports: ["model", "timeout"],
+    winShell: false,
+  },
+  {
+    key: "muse",
+    skill: "muse-delegate",
+    binary: "muse",
+    versionArgs: ["--version"],
+    // No status command that is safe to parse; `muse login` / META_API_KEY are the
+    // documented auth paths, and auth.json must not be opened.
+    authProbe: null,
+    modelProbe: null,
+    // sessions/<yyyy>/<mm>/<dd>/<id>/ — one directory per session; session.jsonl
+    // inside is conversation content and is never opened. XDG_DATA_HOME selects
+    // the store root; an absent store reports unknown, never legacy usage.
+    usageProbe: {
+      envDir: "XDG_DATA_HOME",
+      envSubdir: "muse",
+      homeSubdir: ".local/share/muse",
+      path: ["sessions", "*", "*", "*"],
+      entry: "dir",
+      match: /./,
+    },
+    // --provider echo|meta is relay-only, not a fleet dial.
+    supports: ["model", "effort", "timeout", "readOnly"],
     winShell: false,
   },
   {
@@ -394,6 +443,7 @@ export const CLAUDE_EFFORT = Object.freeze(["low", "medium", "high", "xhigh", "m
 export const AGY_EFFORT = Object.freeze(["low", "medium", "high"]);
 export const COPILOT_EFFORT = Object.freeze(["low", "medium", "high", "xhigh", "max"]);
 export const OMP_THINKING = Object.freeze(["off", "auto", "minimal", "low", "medium", "high", "xhigh", "max"]);
+export const MUSE_EFFORT = Object.freeze(["none", "minimal", "low", "medium", "high", "xhigh", "max", "ultra"]);
 export const CODEX_SANDBOX = Object.freeze(["read-only", "workspace-write", "danger-full-access"]);
 export const GROK_SANDBOX = Object.freeze(["workspace", "read-only", "off"]);
 export const QODER_PERMISSION = Object.freeze([
@@ -423,8 +473,12 @@ export const MODEL_TOKEN = Object.freeze({
   claude: /^[A-Za-z0-9][A-Za-z0-9._:@\/\[\]-]*$/,
   /** Keep in lockstep with cursor-delegate SAFE_MODEL. */
   cursor: /^[A-Za-z0-9][A-Za-z0-9._:@\/\[\]\,=-]*$/,
-  /** Keep in lockstep with grok/pi/codex/commandcode shell-safe tokens (also used for opencode). */
+  /** Keep in lockstep with grok/pi/codex/commandcode shell-safe tokens. */
   shellSafe: /^[A-Za-z0-9][A-Za-z0-9._:\/-]*$/,
+  /** Keep in lockstep with opencode-delegate MODEL_TOKEN: adds # for provider/model#variant (opencode 2.x), plus @ and ~ for catalog ids (@cf/..., model@default, ~vendor/model-latest). */
+  opencode: /^[A-Za-z0-9][A-Za-z0-9._:@~\/#-]*$/,
+  /** Keep in lockstep with mcode-delegate SAFE_MODEL: shell-safe plus # for provider/model#variant. */
+  mcode: /^[A-Za-z0-9][A-Za-z0-9._:\/#-]*$/,
 });
 
 export const CONFIG_VERSION = "delegate-fleet.v1";

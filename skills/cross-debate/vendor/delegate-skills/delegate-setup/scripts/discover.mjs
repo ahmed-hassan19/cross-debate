@@ -15,7 +15,7 @@
  * Node built-ins only. Probed CLIs may contact their own services.
  */
 
-import { execFileSync, spawnSync } from "node:child_process";
+import { execSync, execFileSync, spawnSync } from "node:child_process";
 import { accessSync, constants as fsConstants, readdirSync, readFileSync, realpathSync, statSync } from "node:fs";
 import { homedir } from "node:os";
 import { delimiter, isAbsolute, join, resolve, sep } from "node:path";
@@ -129,6 +129,17 @@ function resolveLaunch(impl) {
     }
     return null;
   }
+  if (impl.key === "mcode" && process.env.MCODE_CLI) {
+    const configured = process.env.MCODE_CLI;
+    if (process.platform === "win32" && !isAbsolute(configured)) return null;
+    const command = /[\\/]/.test(configured) ? resolve(configured) : resolveBinary(configured);
+    try {
+      if (command && statSync(command).isFile()) return { path: command, command, prefixArgs: [] };
+    } catch {
+      // report it missing below
+    }
+    return null;
+  }
   if (process.platform === "win32" && impl.key === "commandcode") {
     const command = resolveBinary("cmdc");
     return command ? { path: command, command, prefixArgs: [] } : null;
@@ -165,13 +176,15 @@ function quoteForCmd(value) {
 }
 
 function runProbe(launch, args, useShell) {
-  const command = useShell ? quoteForCmd(launch.command) : launch.command;
-  return execFileSync(command, [...launch.prefixArgs, ...args], {
+  const probeArgs = [...launch.prefixArgs, ...args];
+  const command = useShell ? [quoteForCmd(launch.command), ...probeArgs].join(" ") : launch.command;
+  const options = {
     encoding: "utf8",
     timeout: PROBE_TIMEOUT_MS,
     stdio: ["pipe", "pipe", "pipe"],
     shell: useShell,
-  });
+  };
+  return useShell ? execSync(command, options) : execFileSync(command, probeArgs, options);
 }
 
 /** Probe output is colorized (opencode); patterns match the plain text. */
@@ -182,13 +195,17 @@ function stripAnsi(text) {
 /** spawnSync, not runProbe: success-path stderr matters (codex prints login status there). */
 function captureProbe(launch, args, useShell) {
   try {
-    const command = useShell ? quoteForCmd(launch.command) : launch.command;
-    const result = spawnSync(command, [...launch.prefixArgs, ...args], {
+    const probeArgs = [...launch.prefixArgs, ...args];
+    const command = useShell ? [quoteForCmd(launch.command), ...probeArgs].join(" ") : launch.command;
+    const options = {
       encoding: "utf8",
       timeout: PROBE_TIMEOUT_MS,
       stdio: ["pipe", "pipe", "pipe"],
       shell: useShell,
-    });
+    };
+    const result = useShell
+      ? spawnSync(command, options)
+      : spawnSync(command, probeArgs, options);
     const stdout = result.stdout || "";
     return {
       ok: !result.error && result.status === 0,
@@ -380,7 +397,8 @@ function readEntries(dir) {
 function probeUsage(impl) {
   const probe = impl.usageProbe;
   if (!probe) return null;
-  const base = (probe.envDir && process.env[probe.envDir]) || join(homedir(), probe.homeSubdir);
+  const envDir = probe.envDir && process.env[probe.envDir];
+  const base = envDir ? join(envDir, probe.envSubdir || "") : join(homedir(), probe.homeSubdir);
   try {
     if (!statSync(base).isDirectory()) return null;
   } catch {

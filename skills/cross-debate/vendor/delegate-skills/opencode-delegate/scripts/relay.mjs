@@ -33,16 +33,20 @@
  *   --brief <file>          Path to the brief. If omitted, the brief is read from stdin.
  *   --cd <dir>              Working root for OpenCode (default: current directory).
  *   --lane <name>           Fleet lane from delegate-setup config (dials apply; explicit flags win).
- *   --model <name>          Model as provider/model. REQUIRED for a fresh run — OpenCode has no
+ *   --model <name>          Model as provider/model, or provider/model#variant on opencode 2.x.
+ *                           REQUIRED for a fresh run — OpenCode has no
  *                           safe default; a resumed run inherits its session's model.
  *   --agent <name>          OpenCode agent (default: build). Use plan for read-only review.
  *   --read-only             Shortcut for --agent plan (review/diagnosis, no edits).
- *   --variant <name>        Provider reasoning effort (e.g. high, max, minimal).
+ *   --variant <name>        Provider reasoning effort (e.g. high, max, minimal). Sent as
+ *                           --variant on opencode 1.x; on 2.x it joins the model value
+ *                           as provider/model#variant (2.x has no --variant flag).
  *   --no-auto               Don't pass --auto; honor the agent's own permission config (a headless
  *                           run may then hang if the agent is set to ask for a permission).
  *   --resume-last           Continue the most recent OpenCode session; send only the delta brief.
  *   --session <id>          Continue a specific session id (ses_...); send only the delta brief.
  *   --pure                  Run OpenCode without external plugins (cleaner event stream).
+ *                           1.x only; rejected on 2.x, which dropped the flag.
  *   --timeout <dur>         Relay-side watchdog (default: off). Durations use h/m/s
  *                           strings like 30m or 2h. On expiry the opencode child is
  *                           killed and result.json gets status "timeout".
@@ -67,7 +71,7 @@
  * file must therefore also treat a non-zero exit with no file as a usage error.
  */
 
-import {spawn, execFileSync, spawnSync } from "node:child_process";
+import {spawn, execSync, execFileSync, spawnSync } from "node:child_process";
 import { mkdirSync, writeFileSync, renameSync, readFileSync, existsSync, appendFileSync } from "node:fs";
 import {join, resolve, basename, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -77,9 +81,14 @@ const MAX_BUFFERED_CHARS = 1_048_576;
 
 const VERSION_PROBE_TIMEOUT_MS = 10_000;
 const MAX_TIMER_MS = 2_147_483_647;
-// model/variant reach cmd.exe on win32 (shell:true for the opencode.cmd shim).
-// Keep in lockstep with delegate-setup MODEL_TOKEN.shellSafe.
+// model/variant/agent/session reach cmd.exe on win32 (shell:true for the opencode.cmd shim). The
+// model token may carry a variant suffix (provider/model#variant on opencode 2.x), and
+// catalog ids carry '@' (Workers AI @cf/..., Vertex model@default, region@eu) and '~'
+// (OpenRouter/Kilo ~vendor/model-latest aliases). None of '#', '@' or '~' is a cmd.exe
+// metacharacter, and no shell runs off win32. Keep SAFE_TOKEN in lockstep with
+// delegate-setup MODEL_TOKEN.shellSafe, and MODEL_TOKEN with MODEL_TOKEN.opencode.
 const SAFE_TOKEN = /^[A-Za-z0-9][A-Za-z0-9._:/-]*$/;
+const MODEL_TOKEN = /^[A-Za-z0-9][A-Za-z0-9._:@~/#-]*$/;
 
 const IMPLEMENTER_KEY = "opencode";
 
@@ -236,11 +245,16 @@ function parseArgs(argv) {
     }
   }
   applyFleetLane(opts, flagged);
-  if (opts.model !== null && !SAFE_TOKEN.test(opts.model)) {
-    fail("--model contains unsupported characters (allowed: letters, digits, . _ : / -)");
+  if (opts.model !== null && !MODEL_TOKEN.test(opts.model)) {
+    fail("--model contains unsupported characters (allowed: letters, digits, . _ : @ ~ / # -)");
   }
-  if (opts.variant !== null && !SAFE_TOKEN.test(opts.variant)) {
-    fail("--variant contains unsupported characters (allowed: letters, digits, . _ : / -)");
+  for (const flag of ["variant", "agent", "session"]) {
+    if (opts[flag] !== null && !SAFE_TOKEN.test(opts[flag])) {
+      fail(`--${flag} contains unsupported characters (allowed: letters, digits, . _ : / -)`);
+    }
+  }
+  if (opts.model !== null && opts.model.includes("#") && opts.variant !== null) {
+    fail("--model already carries a variant (provider/model#variant); pass either that or --model plus --variant, not both");
   }
   // The watchdog is relay-only (the opencode launch has no timeout flag), so a malformed
   // --timeout must fail loudly here - a silent no-watchdog fallback would be wrong.
@@ -330,12 +344,15 @@ function opencodeVersion(probeTimeoutMs) {
     // auto-appends .exe, never .cmd, so launching it needs shell:true there or it
     // ENOENTs on a working install. POSIX is unaffected. (git installs a real
     // git.exe and must NOT get this flag — see gitTouchedFiles.)
-    const version = execFileSync("opencode", ["--version"], {
+    const options = {
       encoding: "utf8",
       shell: process.platform === "win32",
       timeout: probeTimeoutMs,
       killSignal: "SIGKILL",
-    }).trim();
+    };
+    const version = (process.platform === "win32"
+      ? execSync("opencode --version", options)
+      : execFileSync("opencode", ["--version"], options)).trim();
     return { version: version || "unknown", error: null };
   } catch (error) {
     if (error?.code === "ENOENT") return { version: null, error: null };
@@ -350,6 +367,16 @@ function opencodeVersion(probeTimeoutMs) {
     // off to reinstall a binary that is already there.
     return { version: null, error };
   }
+}
+
+// opencode 2.x replaced the --variant flag with a provider/model#variant model value
+// (2.0.11's `run --help` documents exactly that format and ships no --variant flag);
+// 1.x still documents --variant. The preflight above already probed the version, so the
+// dial mapping gates on it. An unparseable string falls back to the 1.x mapping — the
+// flag every opencode line has accepted so far.
+function opencodeJoinsVariant(version) {
+  const match = /(\d+)(?:\.\d+)*/.exec(String(version || ""));
+  return match !== null && Number(match[1]) >= 2;
 }
 
 function gitTouchedFiles(cwd) {
@@ -373,7 +400,7 @@ function timestamp() {
   return new Date().toISOString().replace(/[:.]/g, "-");
 }
 
-function buildArgv(opts) {
+function buildArgv(opts, version) {
   const argv = ["run", "--format", "json"];
   if (opts.pure) argv.push("--pure");
   // Resume continues an existing session; --session pins a specific id, otherwise
@@ -385,8 +412,13 @@ function buildArgv(opts) {
     argv.push("--continue");
   }
   argv.push("--agent", opts.agent);
-  if (opts.model) argv.push("--model", opts.model);
-  if (opts.variant) argv.push("--variant", opts.variant);
+  // Variant dial: 2.x folds it into the model value as provider/model#variant (it has
+  // no --variant flag); 1.x still takes --variant. See opencodeJoinsVariant.
+  const joinsVariant = Boolean(opts.model && opts.variant) && opencodeJoinsVariant(version);
+  if (opts.model) {
+    argv.push("--model", joinsVariant ? `${opts.model}#${opts.variant}` : opts.model);
+  }
+  if (opts.variant && !joinsVariant) argv.push("--variant", opts.variant);
   // --auto (on by default) auto-approves permissions so a headless build run doesn't
   // block on a prompt no one can answer; --no-auto honors the agent's own config.
   // Never on a plan (read-only) run: --auto would approve the plan agent's ask-gated
@@ -480,8 +512,15 @@ function reportVersionFailure(opts, writeResult, run, error, probeTimeoutMs) {
   process.exit(result.exitCode);
 }
 
-function dispatchToOpenCode(opts, brief, run, writeResult) {
-  const argv = buildArgv(opts);
+function spawnShellLaunch(binary, argv, options, useShell) {
+  if (!useShell) return spawn(binary, argv, options);
+  // Node 24 warns when shell:true is paired with an args array. The args here
+  // are already token-validated or quoted for cmd.exe, so serialize them once.
+  return spawn([binary, ...argv].join(" "), { ...options, shell: true });
+}
+
+function dispatchToOpenCode(opts, brief, run, writeResult, version) {
+  const argv = buildArgv(opts, version);
   // Pin the working root two ways: `cwd` sets the child's real directory, and PWD
   // is set explicitly because OpenCode can resolve its project root from the
   // inherited PWD env — which spawn does NOT rewrite — so without it a run could
@@ -490,15 +529,14 @@ function dispatchToOpenCode(opts, brief, run, writeResult) {
   // shell quoting.
   // shell:true on Windows so the opencode.cmd shim resolves (see opencodeVersion).
   // Safe: the brief is fed via child.stdin below — never argv — and argv holds only
-  // flag names, an agent enum, a model string, and a session id, with no shell
+  // flag names and token-validated agent, model, variant, and session values, with no shell
   // metacharacters or spaceable paths.
-  const child = spawn("opencode", argv, {
+  const child = spawnShellLaunch("opencode", argv, {
     cwd: opts.cd,
     env: { ...process.env, PWD: opts.cd },
     stdio: ["pipe", "pipe", "pipe"],
-    shell: process.platform === "win32",
     detached: process.platform !== "win32", // POSIX: lead a new process group so killChild can fell the whole tree
-  });
+  }, process.platform === "win32");
 
   let sessionId = opts.session || null;
   let totalCost = 0;
@@ -608,6 +646,23 @@ function dispatchToOpenCode(opts, brief, run, writeResult) {
     });
   }
 
+  // A grandchild that outlives opencode and inherited the pipes keeps stdout/stderr open, so
+  // "close" never fires and the relay waits forever, writing no result. Once opencode itself is
+  // gone the pipes hold nothing we still need, so drop them after a short drain grace and let
+  // "close" run. This is the normal-exit twin of the stream teardown the watchdog already
+  // does on the timeout path.
+  child.once("exit", () => {
+    // The implementer already exited. Leaving the watchdog armed lets a drain that
+    // overlaps the remaining budget fire, set watchdogFired, and report timeout.
+    if (!watchdogFired) clearWatchdog();
+    const drain = setTimeout(() => {
+      if (settled) return;
+      child.stdout.destroy();
+      child.stderr.destroy();
+    }, 500);
+    if (typeof drain.unref === "function") drain.unref();
+  });
+
   child.on("error", (err) => {
     if (settled) return;
     settled = true;
@@ -681,8 +736,17 @@ function main() {
     reportVersionFailure(opts, writeResult, run, probe.error, probeTimeoutMs);
     return;
   }
+  // A resumed run may inherit its session's model, but a variant can only join a model
+  // value — on 2.x there is no --variant flag to fall back to.
+  if (opts.variant && !opts.model && opencodeJoinsVariant(probe.version)) {
+    fail("--variant needs --model on opencode 2.x: the variant joins the model value as provider/model#variant");
+  }
+  // 2.x dropped --pure from `opencode run` (same version gate as the variant dial).
+  if (opts.pure && opencodeJoinsVariant(probe.version)) {
+    fail("--pure is not supported on opencode 2.x: `opencode run` dropped the flag and has no replacement; drop --pure");
+  }
 
-  dispatchToOpenCode(opts, brief, run, writeResult);
+  dispatchToOpenCode(opts, brief, run, writeResult, probe.version);
 }
 
 function printSummary(result, resultPath) {
