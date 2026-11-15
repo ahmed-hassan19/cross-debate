@@ -400,7 +400,7 @@ test('a lane resolves in the orchestrator and reaches the relay as explicit dial
 const a = process.argv;
 if (a.includes('--help')) { console.log('--read-only'); process.exit(0); }
 fs.writeFileSync(${JSON.stringify(record)}, JSON.stringify(a.slice(2)));
-fs.writeFileSync(${JSON.stringify(record + '.env')}, JSON.stringify({ claude: process.env.CLAUDE_CODE_DISABLE_CLAUDE_MDS, opencode: process.env.OPENCODE_DISABLE_PROJECT_CONFIG }));
+fs.writeFileSync(${JSON.stringify(record + '.env')}, JSON.stringify({ claude: process.env.CLAUDE_CODE_DISABLE_CLAUDE_MDS, opencode: process.env.OPENCODE_DISABLE_PROJECT_CONFIG, advisorDisabled: process.env.CLAUDE_CODE_DISABLE_ADVISOR_TOOL }));
 fs.writeFileSync(a[a.indexOf('--out-dir') + 1] + '/result.json', JSON.stringify({ status: 'completed', finalMessage: '{}' }));
 `);
   process.env.DELEGATE_SKILLS_DIR = skills;
@@ -411,7 +411,7 @@ fs.writeFileSync(a[a.indexOf('--out-dir') + 1] + '/result.json', JSON.stringify(
   assert.equal(argv.includes('--lane'), false);
   assert.deepEqual(argv.slice(argv.indexOf('--model'), argv.indexOf('--model') + 2), ['--model', 'model-a']);
   assert.deepEqual(argv.slice(argv.indexOf('--effort'), argv.indexOf('--effort') + 2), ['--effort', 'medium']);
-  assert.deepEqual(JSON.parse(fs.readFileSync(record + '.env', 'utf8')), { claude: '1', opencode: '1' });
+  assert.deepEqual(JSON.parse(fs.readFileSync(record + '.env', 'utf8')), { claude: '1', opencode: '1', advisorDisabled: '1' });
 });
 
 test('a plan with an unclosed code fence is refused instead of hiding its review block inside the fence', () => {

@@ -568,18 +568,25 @@ test('--help never launches a model and exits 0; helper imports have no CLI side
   for (const implementer of ['codex', 'opencode', 'claude']) {
     const dir = path.join(relayRoot, `${implementer}-delegate`, 'scripts');
     fs.mkdirSync(dir, { recursive: true });
-    fs.writeFileSync(path.join(dir, 'relay.mjs'), `import fs from 'node:fs'; import path from 'node:path'; const args = process.argv.slice(2); const out = args[args.indexOf('--out-dir') + 1]; fs.mkdirSync(out, {recursive:true}); fs.writeFileSync(path.join(out, 'result.json'), JSON.stringify({args}));`);
+    fs.writeFileSync(path.join(dir, 'relay.mjs'), `import fs from 'node:fs'; import path from 'node:path'; const args = process.argv.slice(2); const out = args[args.indexOf('--out-dir') + 1]; fs.mkdirSync(out, {recursive:true}); fs.writeFileSync(path.join(out, 'result.json'), JSON.stringify({args, advisorDisabled: process.env.CLAUDE_CODE_DISABLE_ADVISOR_TOOL}));`);
   }
   const oldRoot = process.env.DELEGATE_SKILLS_DIR;
+  const oldAdvisor = process.env.CLAUDE_CODE_DISABLE_ADVISOR_TOOL;
   process.env.DELEGATE_SKILLS_DIR = relayRoot;
+  process.env.CLAUDE_CODE_DISABLE_ADVISOR_TOOL = '0';
   try {
     for (const implementer of ['codex', 'opencode', 'claude']) {
       const relay = common.runRelay({ implementer, lane: 'test', briefPath: plan.TEMPLATE_PATH, cwd: SCRATCH, outDir: path.join(SCRATCH, `args-${implementer}`), timeout: '1s' });
       assert.equal(relay.exitCode, 0);
+      assert.equal(relay.result.advisorDisabled, '1');
+      assert.equal(process.env.CLAUDE_CODE_DISABLE_ADVISOR_TOOL, '0');
       assert.equal(relay.result.args.includes('--ignore-user-config'), implementer === 'codex');
       assert.ok(relay.result.args.includes('--read-only'));
     }
-  } finally { if (oldRoot === undefined) delete process.env.DELEGATE_SKILLS_DIR; else process.env.DELEGATE_SKILLS_DIR = oldRoot; }
+  } finally {
+    if (oldRoot === undefined) delete process.env.DELEGATE_SKILLS_DIR; else process.env.DELEGATE_SKILLS_DIR = oldRoot;
+    if (oldAdvisor === undefined) delete process.env.CLAUDE_CODE_DISABLE_ADVISOR_TOOL; else process.env.CLAUDE_CODE_DISABLE_ADVISOR_TOOL = oldAdvisor;
+  }
 
 });
 
