@@ -11,9 +11,8 @@ import { findScript, loadLaneConfig, relaySupportsReadOnly, childEnv, cliCommand
 const DIAL_FLAGS = { model: '--model', effort: '--effort', variant: '--variant', provider: '--provider' };
 
 /**
- * Reviewer CLIs also skip the checkout's instruction files themselves, behind review.mjs's quarantine. Codex has no
- * such switch its relay forwards, so it relies on the quarantine alone. Claude's switch drops the user's CLAUDE.md
- * too, which keeps reviewers to their self-contained briefs.
+ * These project controls supplement checkout quarantine. Claude's also skips the user's CLAUDE.md;
+ * shortcut: OpenCode 2 may reuse the server's environment; adopt private-server relay support when available.
  */
 const NO_PROJECT_INSTRUCTIONS = { CLAUDE_CODE_DISABLE_CLAUDE_MDS: '1', OPENCODE_DISABLE_PROJECT_CONFIG: '1' };
 
@@ -61,7 +60,7 @@ export function dispatch({ role, who, brief, cwd, outDir, timeout }) {
 
   const args = [relay, '--brief', briefPath, '--cd', cwd, '--read-only', '--out-dir', dir, '--timeout', timeout];
   for (const [field, value] of Object.entries(who.dials || {})) args.push(DIAL_FLAGS[field], String(value));
-  if (who.implementer === 'codex') args.push('--ignore-user-config');
+  if (who.implementer === 'codex') args.push('--ignore-user-config', '--no-project-doc');
 
   log(`${role}: ${who.implementer}${who.lane ? ` (lane ${who.lane})` : ''} …`);
   const started = Date.now();

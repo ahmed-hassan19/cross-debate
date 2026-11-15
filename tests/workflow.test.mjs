@@ -577,6 +577,7 @@ test('--help never launches a model and exits 0; helper imports have no CLI side
       const relay = common.runRelay({ implementer, lane: 'test', briefPath: plan.TEMPLATE_PATH, cwd: SCRATCH, outDir: path.join(SCRATCH, `args-${implementer}`), timeout: '1s' });
       assert.equal(relay.exitCode, 0);
       assert.equal(relay.result.args.includes('--ignore-user-config'), implementer === 'codex');
+      assert.equal(relay.result.args.includes('--no-project-doc'), implementer === 'codex');
       assert.ok(relay.result.args.includes('--read-only'));
     }
   } finally { if (oldRoot === undefined) delete process.env.DELEGATE_SKILLS_DIR; else process.env.DELEGATE_SKILLS_DIR = oldRoot; }

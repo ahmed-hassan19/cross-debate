@@ -167,7 +167,15 @@ The code Stop gate recognizes a promotion turn without a ledger write. A clean H
 
 Codex plan-mode Stop passes when the final message has no `<proposed_plan>`; the hook cannot verify a plan that was not emitted in that form.
 
-Read-only violations reject output; absent or null tripwire reports remain accepted with a warning, except Codex coverage is recorded as `sandbox` when no explicit tripwire result exists. The Codex relay ignores ambient user configuration (`--ignore-user-config`); code reviewers are launched by the `review` backend.
+Read-only violations reject output; absent or null tripwire reports remain accepted with a warning, except Codex coverage is recorded as `sandbox` when no explicit tripwire result exists. Code reviewers are launched by the `review` backend.
+
+Every Codex reviewer launch, including plan reviews and judges, passes `--ignore-user-config` and
+`--no-project-doc`. Project `AGENTS.md`, overrides and fallback filenames are not loaded automatically;
+user-level instructions in `CODEX_HOME` still load, and reviewers can still read files through tools.
+The flags are sent on every attempt, including retries and resumed relay sessions. Code reviews retain
+checkout quarantine and standards supplied from the base commit. Plan reviews use the project directory
+without quarantine; put required project guidance in the review input. An explicit `DELEGATE_SKILLS_DIR`
+override must provide a Codex relay supporting `--no-project-doc`.
 
 The offline suite exercises every host adapter, lifecycle gates, scope transitions, failure/resume state, and one-use publication approval without model calls. Real interactive validation needs the user: launch the agent, confirm hooks are trusted (`/hooks` in Codex if doctor warns), exercise a plan decision, deny then approve a manual escalation, and verify the hook events in the resulting transcript. Scripted auto-approval cannot verify human prompts. Record unperformed checks as pending, not passed.
 

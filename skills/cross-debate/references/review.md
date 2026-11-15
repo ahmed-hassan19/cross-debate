@@ -27,12 +27,14 @@ node "<cross-debate-dir>/scripts/debate.mjs" review <pr-url | number> [--dry-run
   work when `gh` is logged in to them; any other forge is rejected with an explicit error.
 - `--dry-run` runs models and consumes provider usage, then prints the review without posting. It does not combine with `--local`.
 - Reviewers run in a disposable checkout. Before they start, the diff is scanned for secrets and project agent
-  configuration (`.claude/`, `.codex/`, `.opencode/`, `opencode.json[c]`, `.mcp.json`) is removed, so a reviewed PR's
-  hooks, plugins or MCP servers never run. Tracked `CLAUDE.md`, `CLAUDE.local.md`, `AGENTS.md` and
-  `AGENTS.override.md` files are removed at every depth, so reviewer CLIs never auto-load the PR's own instructions.
-  Claude and OpenCode reviewers also run with their own instruction loading off (`CLAUDE_CODE_DISABLE_CLAUDE_MDS=1`,
-  `OPENCODE_DISABLE_PROJECT_CONFIG=1`); the Claude switch also skips the user's `~/.claude/CLAUDE.md`. Codex
-  relies on the removal alone.
+  configuration (`.claude/`, `.codex/`, `.opencode/`, `opencode.json[c]`, `.mcp.json`) is removed.
+  Tracked `CLAUDE.md`, `CLAUDE.local.md`, `AGENTS.md` and `AGENTS.override.md` files are removed at every depth.
+  Claude reviewers also receive `CLAUDE_CODE_DISABLE_CLAUDE_MDS=1`, which skips the user's `~/.claude/CLAUDE.md` too.
+  Codex receives `--no-project-doc` on every launch to suppress automatic project instruction loading, including
+  overrides and fallback filenames. Quarantine remains necessary because the flag does not prevent tool reads.
+  OpenCode receives `OPENCODE_DISABLE_PROJECT_CONFIG=1`; on OpenCode 2, its shared server may retain its own
+  environment, so this child-process setting alone does not guarantee suppression. Private-server relay support
+  is tracked in [delegate-skills #167](https://github.com/amElnagdy/delegate-skills/pull/167).
 - Standards (`CONTRIBUTING.md`, `CODING_STANDARDS.md`, `CLAUDE.md`, `AGENTS.md`, the PR template,
   `.github/copilot-instructions.md`, `.cursorrules`, `docs/agents/`, `.cursor/rules/`, plus `CLAUDE.md` and
   `AGENTS.md` in each parent directory of a changed path) are read from the base commit, not the head, and

@@ -983,7 +983,7 @@ export function relaySupportsReadOnly(relayPath) {
 /** Run one relay read-only. Returns { status, result, seconds, exitCode } where result is result.json or null. */
 export function runRelay({ implementer, lane, briefPath, cwd, outDir, timeout, extraArgs = [], env }) {
   const relay = findScript(`${implementer}-delegate`, 'relay.mjs');
-  const args = [relay, '--brief', briefPath, '--cd', cwd, '--lane', lane, '--read-only', '--out-dir', outDir, '--timeout', timeout, ...(implementer === 'codex' ? ['--ignore-user-config'] : []), ...extraArgs];
+  const args = [relay, '--brief', briefPath, '--cd', cwd, '--lane', lane, '--read-only', '--out-dir', outDir, '--timeout', timeout, ...(implementer === 'codex' ? ['--ignore-user-config', '--no-project-doc'] : []), ...extraArgs];
   const started = Date.now();
   const proc = spawnSync(process.execPath, args, { encoding: 'utf8', maxBuffer: 64 * 1024 * 1024, stdio: ['ignore', 'pipe', 'pipe'], env: childEnv(env) });
   const seconds = Math.round((Date.now() - started) / 1000);
