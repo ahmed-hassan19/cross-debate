@@ -26,11 +26,65 @@ else {
   console.log(JSON.stringify({type:'text',part:{id:'answer',type:'text',text:'review complete'}}));
 }
 `, { mode: 0o755 });
+fs.writeFileSync(path.join(bin, 'codex'), `#!/usr/bin/env node
+const fs = require('node:fs');
+const args = process.argv.slice(2);
+if (args.includes('--version')) console.log('codex-cli 0.169.0');
+else {
+  fs.writeFileSync(process.env.FAKE_ARGV, JSON.stringify(args));
+  fs.writeFileSync(args[args.indexOf('-o') + 1], 'review complete');
+  console.log(JSON.stringify({type:'thread.started',thread_id:'thread-test'}));
+}
+`, { mode: 0o755 });
 const model = 'cloudflare/@cf/meta/llama';
 const configDir = path.join(process.env.XDG_CONFIG_HOME, 'delegate-skills');
 fs.mkdirSync(configDir, { recursive: true });
 fs.writeFileSync(path.join(configDir, 'config.json'), JSON.stringify({ version: 'delegate-fleet.v1',
-  lanes: { reviewer: { implementer: 'opencode', model, variant: 'high' } } }));
+  lanes: { reviewer: { implementer: 'opencode', model, variant: 'high' },
+    'codex-reviewer': { implementer: 'codex', model: 'review-model', effort: 'high' } } }));
+
+for (const shape of ['plan', 'judge', 'dispatch', 'resume']) {
+  test(`bundled Codex: ${shape} suppresses project docs and stays read-only`, () => {
+    const dir = fs.mkdtempSync(path.join(scratch, 'codex-'));
+    const repo = path.join(dir, 'repo');
+    fs.mkdirSync(repo);
+    const init = spawnSync('git', ['init', '-q', repo], { encoding: 'utf8' });
+    assert.equal(init.status, 0, init.stderr);
+    process.env.FAKE_ARGV = path.join(dir, 'argv.json');
+    const outDir = path.join(dir, 'output');
+    let result;
+    if (shape === 'dispatch') {
+      const response = dispatch({ role: 'main', who: { implementer: 'codex', dials: { model: 'review-model', effort: 'high' } },
+        brief: 'Review only.', cwd: repo, outDir, timeout: '10s' });
+      assert.equal(response.text, 'review complete');
+      result = JSON.parse(fs.readFileSync(path.join(outDir, 'main', 'result.json')));
+    } else {
+      const briefPath = path.join(dir, 'brief.md');
+      fs.writeFileSync(briefPath, 'Review only.');
+      const extraArgs = shape === 'judge' ? ['--model', 'judge-model', '--effort', 'medium']
+        : shape === 'resume' ? ['--session', 'thread-test'] : [];
+      const response = runRelay({ implementer: 'codex', lane: 'codex-reviewer', briefPath, cwd: repo, outDir,
+        timeout: '10s', extraArgs });
+      assert.equal(response.exitCode, 0, response.stderrTail);
+      result = response.result;
+    }
+    assert.equal(result.status, 'completed');
+    assert.equal(result.finalMessage, 'review complete');
+    assert.equal(result.noProjectDoc, true);
+    assert.equal(result.ignoreUserConfig, true);
+    assert.deepEqual(result.touchedFiles, []);
+    const argv = JSON.parse(fs.readFileSync(process.env.FAKE_ARGV));
+    const override = argv.indexOf('project_doc_max_bytes=0');
+    assert.equal(argv.filter(arg => arg === 'project_doc_max_bytes=0').length, 1);
+    assert.equal(argv[override - 1], '-c');
+    assert.equal(argv[argv.indexOf('-s') + 1], 'read-only');
+    assert.equal(argv[argv.indexOf('-m') + 1], shape === 'judge' ? 'judge-model' : 'review-model');
+    if (shape === 'resume') {
+      assert.equal(argv[argv.indexOf('resume') + 1], 'thread-test');
+      assert.ok(override > argv.indexOf('resume'));
+    }
+  });
+}
 
 for (const version of ['1.17.13', '2.2.5']) for (const shape of ['plan', 'judge', 'dispatch']) {
   test(`bundled OpenCode ${version}: ${shape} dials and read-only completion`, () => {

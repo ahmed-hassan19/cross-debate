@@ -409,6 +409,7 @@ fs.writeFileSync(a[a.indexOf('--out-dir') + 1] + '/result.json', JSON.stringify(
   } finally { delete process.env.DELEGATE_SKILLS_DIR; }
   const argv = JSON.parse(fs.readFileSync(record, 'utf8'));
   assert.equal(argv.includes('--lane'), false);
+  assert.equal(argv.includes('--no-project-doc'), true);
   assert.deepEqual(argv.slice(argv.indexOf('--model'), argv.indexOf('--model') + 2), ['--model', 'model-a']);
   assert.deepEqual(argv.slice(argv.indexOf('--effort'), argv.indexOf('--effort') + 2), ['--effort', 'medium']);
   assert.deepEqual(JSON.parse(fs.readFileSync(record + '.env', 'utf8')), { claude: '1', opencode: '1', advisorDisabled: '1' });

@@ -581,6 +581,7 @@ test('--help never launches a model and exits 0; helper imports have no CLI side
       assert.equal(relay.result.advisorDisabled, '1');
       assert.equal(process.env.CLAUDE_CODE_DISABLE_ADVISOR_TOOL, '0');
       assert.equal(relay.result.args.includes('--ignore-user-config'), implementer === 'codex');
+      assert.equal(relay.result.args.includes('--no-project-doc'), implementer === 'codex');
       assert.ok(relay.result.args.includes('--read-only'));
     }
   } finally {

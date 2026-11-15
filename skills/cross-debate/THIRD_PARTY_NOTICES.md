@@ -5,7 +5,7 @@ This skill bundles and adapts MIT-licensed code. Each upstream license is reprod
 ## delegate-skills
 
 - Source: https://github.com/amElnagdy/delegate-skills
-- Pinned commit: `7f8ae3435e5bc68a54efdca9f67797e905845562`
+- Pinned commit: `48b53d33b53ef260de76c3d2c1313e2c62a24820`
 - Bundled unmodified under `vendor/delegate-skills/`:
   - `claude-delegate/scripts/relay.mjs`
   - `codex-delegate/scripts/relay.mjs`
@@ -42,7 +42,7 @@ SOFTWARE.
 
 - Source: https://github.com/amElnagdy/review-skills
 - Nearest upstream commit: `c26e4d070300fd6f0047bd855ff8a112decca1d9` (skills/debate-review), **modified locally**:
-  GitHub-only forge support, per-role brief contracts (`scripts/lib/briefs.mjs`) and prompt edits, `--ignore-user-config`
+  GitHub-only forge support, per-role brief contracts (`scripts/lib/briefs.mjs`) and prompt edits, `--ignore-user-config` and `--no-project-doc`
   for Codex reviewers, lane resolution in the orchestrator with explicit dials passed to the bundled relays, the `debate.mjs review` entrypoint,
   a secret scan before dispatch, rejection of read-only violations, the diff supplied as files for relays that cannot
   run Git, and decoding of Git-quoted diff paths.
