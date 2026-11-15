@@ -966,7 +966,7 @@ export function extractJson(message) {
   if (openings.length) return null;
   try { return JSON.parse(text.slice(text.indexOf('{'), text.lastIndexOf('}') + 1)); } catch { return null; }
 }
-export function childEnv(extra = {}) { return { ...process.env, DEBATE_CHILD: '1', ...extra }; }
+export function childEnv(extra = {}) { return { ...process.env, DEBATE_CHILD: '1', ...extra, CLAUDE_CODE_DISABLE_ADVISOR_TOOL: '1' }; }
 export function loadLaneConfig(cwd) {
   const r = spawnSync(process.execPath, [findScript('delegate-setup', 'config.mjs'), 'load', '--cwd', cwd], { encoding: 'utf8', env: childEnv() });
   if (r.error || r.status !== 0) throw new Error((r.stderr || 'lane config load failed').trim());

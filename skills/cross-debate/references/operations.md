@@ -169,6 +169,10 @@ Codex plan-mode Stop passes when the final message has no `<proposed_plan>`; the
 
 Read-only violations reject output; absent or null tripwire reports remain accepted with a warning, except Codex coverage is recorded as `sandbox` when no explicit tripwire result exists. The Codex relay ignores ambient user configuration (`--ignore-user-config`); code reviewers are launched by the `review` backend.
 
+Review child processes set `CLAUDE_CODE_DISABLE_ADVISOR_TOOL=1` so Claude reviewers do not add advisor calls
+inside a cross-debate pass. This covers plan reviews, judges, and code/PR reviews, including retries. The
+parent process and saved Claude advisor preference are unchanged.
+
 The offline suite exercises every host adapter, lifecycle gates, scope transitions, failure/resume state, and one-use publication approval without model calls. Real interactive validation needs the user: launch the agent, confirm hooks are trusted (`/hooks` in Codex if doctor warns), exercise a plan decision, deny then approve a manual escalation, and verify the hook events in the resulting transcript. Scripted auto-approval cannot verify human prompts. Record unperformed checks as pending, not passed.
 
 ## Hosts
