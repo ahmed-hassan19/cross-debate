@@ -18,7 +18,7 @@ test('Codex menus keep the newest model of each tier instead of collapsing every
 
 test('Claude menus fall back to versioned model IDs for every family, including Fable', () => {
   assert.deepEqual(modelMenu('claude', null).map(x => x.value),
-    ['default', 'claude-opus-5-5', 'claude-fable-5-1', 'claude-sonnet-5-5', 'claude-haiku-4-5-20251001', 'other']);
+    ['default', 'claude-opus-5-5', 'claude-fable-5-2', 'claude-sonnet-5-5', 'claude-haiku-5-5', 'other']);
 });
 
 const fakeChild = respond => {
@@ -51,7 +51,7 @@ test('Claude lists the account\'s versioned models through the initialize contro
 });
 
 test('Claude falls back to versioned IDs when the CLI fails or never answers', async () => {
-  const versioned = ['claude-opus-5-5', 'claude-fable-5-1', 'claude-sonnet-5-5', 'claude-haiku-4-5-20251001'];
+  const versioned = ['claude-opus-5-5', 'claude-fable-5-2', 'claude-sonnet-5-5', 'claude-haiku-5-5'];
   assert.deepEqual(await claudeModels({ spawnImpl: () => { throw new Error('ENOENT'); } }), versioned);
   assert.deepEqual(await claudeModels({ spawnImpl: () => fakeChild(() => null), timeout: 5 }), versioned);
 });
@@ -80,6 +80,6 @@ test('Codex catalog timeout falls back without exposing child diagnostics', asyn
   child.stdin = { write() {} };
   let killed = false;
   child.kill = () => { killed = true; };
-  assert.deepEqual(await codexModels({ spawnImpl: () => child, timeout: 5 }), ['gpt-6.1-sol', 'gpt-6-astra', 'gpt-6-luna', 'gpt-5.6-terra']);
+  assert.deepEqual(await codexModels({ spawnImpl: () => child, timeout: 5 }), ['gpt-6.2-sol', 'gpt-6.2-astra', 'gpt-6.1-terra', 'gpt-6-luna']);
   assert.equal(killed, true);
 });
