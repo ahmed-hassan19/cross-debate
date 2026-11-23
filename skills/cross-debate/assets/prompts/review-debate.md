@@ -24,6 +24,8 @@ highest bar.
 - `refute` only when the refutation is constructible from the code. The claim is factually wrong
   (quote the actual line). It is provably impossible (show the type, constant, or invariant). It is
   fully guarded (cite the guard). Or no evidence-backed trigger remains (name the unsupported premise).
+  A sibling caller that a partial fix left broken is in scope even though its line predates the diff.
+  Judge such a finding, but never add one to `new_findings`.
 - `downgrade` when severity, confidence, or a suggestion needs correction; name which one. Lower
   severity only when the remaining defect falls below the blocking bar. For a confidence-only
   concession, preserve justified severity while an evidence-backed trigger remains. A partially
@@ -45,8 +47,10 @@ review. Add one only when it is `blocking`, you can name the trigger and the wro
 one of: auth or trust boundaries, data loss or duplication, idempotency or partial failure, races and
 ordering, schema drift or migrations. Do not relabel a non-blocking issue as blocking to get it
 through. Zero new findings is the expected outcome on most PRs. Do not pad. First passes tend to miss
-moved or extracted code that dropped a guard or anchor, a lock scope that shrank, and a config default
-that flipped. Those are places to look, not new categories: a finding there still has to fit one above.
+moved or extracted code that dropped a guard or anchor, a lock scope that shrank, a config default
+that flipped, a dataclass default evaluated once, `hash()` of strings assumed stable across runs, and
+a predicate that mutates state. Those are places to look, not new categories: a finding there still
+has to fit one above.
 
 ## Bar
 - Every verdict and every new finding carries evidence: `file:line` or quoted code. Where a grep
