@@ -1,13 +1,13 @@
 import { spawn } from 'node:child_process';
 
 const TIMEOUT_MS = 2500;
-// ponytail: newest model per family as of 2026-10-05, used only when the CLI cannot list its models.
+// ponytail: newest model per family as of 2026-11-23, used only when the CLI cannot list its models.
 const fallback = {
-  claude: ['claude-opus-5-5', 'claude-fable-5-1', 'claude-sonnet-5-5', 'claude-haiku-4-5-20251001'],
-  codex: ['gpt-6.1-sol', 'gpt-6-astra', 'gpt-6-luna', 'gpt-5.6-terra'],
+  claude: ['claude-opus-5-5', 'claude-fable-5-2', 'claude-sonnet-5-5', 'claude-haiku-5-5'],
+  codex: ['gpt-6.2-sol', 'gpt-6.2-astra', 'gpt-6.1-terra', 'gpt-6-luna'],
 };
 
-// Catalogs list newest first, so the first ID seen per family is the newest. Codex tiers follow the version (gpt-6.1-sol).
+// Catalogs list newest first, so the first ID seen per family is the newest. Codex tiers follow the version (gpt-6.2-sol).
 const family = (cli, id) => cli === 'claude'
   ? (id.match(/(?:^|-)(fable|opus|sonnet|haiku)/i)?.[1].toLowerCase() || id)
   : (id.replace(/^gpt-[\d.]+-?/i, '') || 'gpt');
