@@ -81,6 +81,33 @@ test('debate distinguishes severity, confidence, guards, and suggestion correcti
   assert.ok(!brief.includes('a race, nil on a rare but reachable path'));
 });
 
+test('main reports a repeated mistake once and flags a fix that skips sibling callers', () => {
+  const brief = prose(buildBrief('main', input));
+  assert.ok(brief.includes('If the same mistake recurs, report it once at the first site'));
+  assert.ok(brief.includes('recommend the fix in the shared function'));
+  assert.ok(!brief.includes('defect at one location'));
+  assert.ok(brief.includes('a sibling caller that a partial fix in this PR left broken (the incomplete fix is the defect)'));
+  assert.ok(brief.includes('That finding is `non-blocking` unless the PR, spec, or a commit says the fix covers that caller'));
+  assert.ok(brief.includes('when the behaviour belongs to its contract; otherwise name each caller to change'));
+});
+
+test('debate judges but never adds sibling-caller findings, and final does not withdraw them as predating the diff', () => {
+  const debate = prose(buildBrief('debate', input));
+  assert.ok(debate.includes('A sibling caller that a partial fix left broken is in scope even though its line predates the diff.'));
+  assert.ok(debate.includes('Judge such a finding, but never add one to `new_findings`.'));
+  const final = prose(buildBrief('final', input));
+  assert.ok(final.includes('nor that a sibling caller left broken by a partial fix predates the diff'));
+  assert.ok(final.includes('or an unchanged caller broken by a changed contract). It is discrete.'));
+});
+
+for (const role of ['main', 'final']) {
+  test(`${role} keeps posted text free of restated code and stock contrasts`, () => {
+    const brief = prose(buildBrief(role, input));
+    assert.ok(brief.includes('the author knows the code, so do not restate it'));
+    assert.ok(brief.includes('No not-X-but-Y contrasts, closing restatements, bold labels, or run-up phrases.'));
+  });
+}
+
 test('final prompt and its schema keep downgrade disputes agreed and reserve contested for refutations', () => {
   const brief = prose(buildBrief('final', input));
   const prompt = brief.slice(0, brief.indexOf('## Schema'));

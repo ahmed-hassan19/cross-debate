@@ -20,12 +20,14 @@ block matching `debate-review.findings.v1` (schema below) and nothing after it.
    - Every hunk line by line, then its enclosing function. A defect on an unchanged line of a function
      this PR touches is in scope. For each line ask what input, state, timing, or config makes it wrong.
      Look for inverted or wrong conditions, off-by-one, null or undefined dereference, a missing `await`,
-     falsy-zero checks, wrong-variable copy-paste, errors swallowed in a catch, and unescaped regex
-     metacharacters. Check the language's classic pitfalls: JS `==` coercion and closure-captured loop
-     variables; Python mutable default arguments and late-binding closures; Go nil-map writes and
-     range-variable capture; timezone or DST drift; float equality. For security, check injection (SQL,
-     shell, template), missing authentication or authorization checks, SSRF and path traversal, unsafe
-     deserialization, weak crypto or randomness, insecure cookies or transport, and insecure defaults.
+     falsy-zero checks, wrong-variable copy-paste, errors swallowed in a catch, unescaped regex
+     metacharacters, and a predicate (`is_*`, `has_*`) that mutates state. Check the language's classic
+     pitfalls: JS `==` coercion and closure-captured loop variables; Python mutable default arguments,
+     dataclass defaults evaluated once, late-binding closures, and `hash()` of strings assumed stable
+     across runs; Go nil-map writes and range-variable capture; timezone or DST drift; float equality.
+     For security, check injection (SQL, shell, template), missing authentication or authorization
+     checks, SSRF and path traversal, unsafe deserialization, weak crypto or randomness, insecure cookies
+     or transport, and insecure defaults.
      Invariants stated in code comments of the modified files are contracts too; quote the comment
      verbatim. Scope is the Bar's item 4.
    - Every deleted or replaced line. Name the invariant it enforced, then find where the new code
@@ -33,7 +35,10 @@ block matching `debate-review.findings.v1` (schema below) and nothing after it.
    - Every changed signature or contract. Grep the callers. Check each for a new precondition, a changed
      return shape, a new exception, or an ordering dependency. When the diff adds or changes a wrapper
      (cache, proxy, decorator, adapter), check that every method routes to the wrapped instance rather
-     than back through a registry or global, and that it forwards every method its callers use.
+     than back through a registry or global, and that it forwards every method its callers use. When the
+     diff fixes or guards one caller of a shared function, grep the other callers. If they share the
+     defect, report one finding at the changed line, cite them in `evidence`, and recommend the fix in the
+     shared function when the behaviour belongs to its contract; otherwise name each caller to change.
 2. Spec. Requirements asked for but missing or partial. Behaviour nobody asked for. Implemented but
    wrong. Quote the spec line. If there is no spec, skip the axis and say so in `summary`.
 3. Standards. Violations of the repo's documented rules. Quote the exact rule text and the exact line
@@ -54,11 +59,14 @@ bar become findings.
 - Apply the blocking definition supplied in the schema below.
 - Report a finding only if all of these hold:
   1. It identifies a real defect on one of the axes above.
-  2. It is one discrete, actionable defect at one location.
+  2. It is one discrete, actionable defect. If the same mistake recurs, report it once at the first
+     site and list the other sites in `evidence`.
   3. Fixing it does not demand more rigour than the rest of this codebase already shows.
   4. This diff introduced it, or it sits on an unchanged line of a function this PR touches, or it is
-     an unchanged caller broken by a contract this PR changed. Other pre-existing defects are out of
-     scope even when real.
+     an unchanged caller broken by a contract this PR changed, or it is a sibling caller that a partial
+     fix in this PR left broken (the incomplete fix is the defect). That finding is `non-blocking` unless
+     the PR, spec, or a commit says the fix covers that caller; quote that line. Other pre-existing
+     defects are out of scope even when real.
   5. If you claim it breaks code elsewhere, you identified that code and can cite it. "May affect" is
      not a finding.
   6. It does not rest on an unstated assumption about intent. A behaviour change stated in the PR body
@@ -86,7 +94,9 @@ bar become findings.
   and say so in `evidence`.
 - `claim`, `evidence`, and `recommendation` are posted as an inline comment on a colleague's PR. One
   short paragraph each. At most three lines of quoted code. Matter-of-fact, plain punctuation (no em
-  dashes). No flattery. No severity inflation. Say which inputs the bug depends on.
+  dashes). No flattery. No severity inflation. Say which inputs the bug depends on. Lead with the defect;
+  the author knows the code, so do not restate it. No not-X-but-Y contrasts, closing restatements, bold
+  labels, or run-up phrases.
 - Do not stop at the first qualifying finding, and do not pad. Zero findings with `verdict: approve`
   is the correct answer for a clean diff. Under 15 findings; when that cap forces a cut, correctness,
   security, spec, and standards findings outrank efficiency findings. `summary` under 300 words.

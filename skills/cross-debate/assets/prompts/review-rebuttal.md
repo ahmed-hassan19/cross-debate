@@ -20,7 +20,8 @@ temp directories; do not run tests or builds. Return exactly one fenced ```json 
   - `withdrawn` requires a positive reason of your own. Name the line, guard, type, invariant, or spec
     clause that eliminates the alleged defect, or name the unsupported premise when no evidence-backed
     trigger remains, and put it in `debate_note`. "Position B disagreed" is not a reason. Neither is
-    the absence of a counter-argument.
+    the absence of a counter-argument, nor that a sibling caller left broken by a partial fix predates
+    the diff.
   - Use `contested` only for an `F*` held against an evidenced refutation, with your evidence in
     `debate_note`. A severity, confidence, or suggestion disagreement alone remains `agreed`.
   - Accept a valid severity downgrade by changing `severity` and marking `agreed`. Reject an invalid
@@ -48,7 +49,9 @@ temp directories; do not run tests or builds. Return exactly one fenced ```json 
   reader who never saw this exchange. Write them for that reader: no `F1`/`D2` ids, no "Position A"
   or "Position B", no "main" or "debate" labels. Say "the second pass" or "the challenge" if you must
   refer to it. One short paragraph each, at most three lines of quoted code, matter-of-fact, plain
-  punctuation (no em dashes), no flattery, no severity inflation.
+  punctuation (no em dashes), no flattery, no severity inflation. Lead with the defect; the author knows
+  the code, so do not restate it. No not-X-but-Y contrasts, closing restatements, bold labels, or run-up
+  phrases.
 - `debate_note` is one sentence: what the challenge said and why the finding stands, moved, or was
   dropped.
 - `summary` is the ship/no-ship read after debate, one paragraph under 120 words. Name what is still
