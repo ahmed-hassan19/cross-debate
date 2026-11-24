@@ -55,6 +55,9 @@ completes, reads the result with `code wait --run "<run>" --max-wait 1s`. Every 
 3. Active owners must continue their existing candidate. After its commit, use review --run <run>;
    baseline registration is refused while this session owns it. An unchanged-checkout checkpoint still
    passes for a new/open candidate, but running, verdict, next-round, failure and finish obligations do not.
+   Without a baseline, a session that owns no candidate in this repository's worktrees can stop on a clean checkout when HEAD is reachable
+   from a local remote-tracking ref or its commit or tree has a passed or waived receipt in any worktree of the repository.
+   Uncommitted submodule edits, unreadable directories, or index flags that hide tracked changes prevent this check from passing.
    If a non-owner Stop reports no session baseline, explicitly register the known before-change commit:
    node "<cross-debate-dir>/scripts/debate.mjs" code baseline --seat "<seat>" --session "<session>" --cwd "<cwd>" --base "<before-change-sha>" --reason "<basis for this baseline>"
    HEAD is acceptable only when nothing changed; registration is audited.

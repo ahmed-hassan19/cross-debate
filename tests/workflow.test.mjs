@@ -1231,6 +1231,197 @@ test('code Stop: no baseline blocks (dirty and clean) without registering; expli
   assert.equal(hook('claude', 'Stop', hookPayload(sid2, SCRATCH)).output, null);
 });
 
+for (const seat of ['claude', 'codex']) {
+  test(`${seat} Stop without a baseline rechecks a clean published checkout on every prompt`, () => {
+    const repo = makeRepo(), sid = 'checkout-reader';
+    const payload = hookPayload(sid, repo);
+    const stop = () => hook(seat, 'Stop', payload);
+    const base = common.headSha(repo);
+    fs.writeFileSync(path.join(repo, 'later.txt'), 'later');
+    const tip = commitAll(repo, 'later');
+    gitc(repo, 'update-ref', 'refs/remotes/origin/topic', tip);
+    gitc(repo, 'checkout', '-q', '--detach', base);
+
+    for (let prompt = 0; prompt < 2; prompt++) {
+      hook(seat, 'UserPromptSubmit', payload);
+      assert.equal(stop().output, null);
+    }
+    const ledger = common.loadLedger(HOME, common.repoIdentity(repo).repoKey);
+    assert.deepEqual(ledger.baselines, {});
+    assert.equal(ledger.receipts.length, 0);
+    fs.writeFileSync(path.join(repo, 'new.txt'), 'my change');
+    assert.equal(stop().output.decision, 'block');
+    gitc(repo, 'add', 'new.txt');
+    assert.equal(stop().output.decision, 'block');
+    gitc(repo, 'commit', '-q', '-m', 'local change');
+    assert.match(stop().output.reason, /no session baseline/);
+  });
+
+  test(`${seat} Stop without a baseline honors terminal receipts across worktrees and keeps the owner's review pending`, () => {
+    const repo = makeRepo(), sid = 'checkout-owner';
+    const linked = path.join(SCRATCH, `receipts-${seat}`);
+    gitc(repo, 'worktree', 'add', '-q', '--detach', linked);
+    const head = common.headSha(repo), tree = common.treeOf(repo, head);
+    const stop = session => hook(seat, 'Stop', hookPayload(session, repo));
+    const receipt = data => common.updateLedger(HOME, common.repoIdentity(linked), l => {
+      l.receipts = [data];
+      return l;
+    });
+    receipt({ outcome: 'changed_after_review', commitSha: head, treeId: tree });
+    assert.equal(stop(sid).output.decision, 'block');
+    receipt({ outcome: 'passed', commitSha: head });
+    assert.equal(stop(sid).output, null);
+    gitc(repo, 'commit', '-q', '--allow-empty', '-m', 'same tree under a new commit');
+    assert.equal(stop(sid).output.decision, 'block');
+    receipt({ outcome: 'waived', commitSha: head, treeId: tree });
+    assert.equal(stop(sid).output, null);
+    fs.appendFileSync(path.join(repo, 'app.py'), '# local edit\n');
+    assert.equal(stop(sid).output.decision, 'block');
+    gitc(repo, 'restore', 'app.py');
+
+    const runId = cli('code', ['begin', '--seat', seat, '--session', sid, '--cwd', repo]).json.runId;
+    gitc(repo, 'update-ref', 'refs/remotes/origin/main', common.headSha(repo));
+    assert.match(stop(sid).output.reason, /awaiting its candidate commit/);
+    common.updateRun(HOME, runId, r => { r.status = 'awaiting_verdict'; return r; });
+    assert.equal(stop(sid).note, 'blocked: verdict required');
+    assert.equal(stop('another-reader').output, null);
+    assert.equal(common.loadRun(HOME, runId).status, 'awaiting_verdict');
+  });
+}
+
+test('Stop without a baseline blocks when index flags hide tracked edits on a published HEAD', () => {
+  const repo = makeRepo();
+  gitc(repo, 'update-ref', 'refs/remotes/origin/main', common.headSha(repo));
+  const stop = () => hook('codex', 'Stop', hookPayload('index-reader', repo));
+  for (const flag of ['assume-unchanged', 'skip-worktree']) {
+    gitc(repo, 'update-index', `--${flag}`, 'app.py');
+    fs.appendFileSync(path.join(repo, 'app.py'), '# local edit\n');
+    assert.equal(gitc(repo, 'status', '--porcelain'), '');
+    assert.equal(stop().output?.decision, 'block');
+    gitc(repo, 'update-index', `--no-${flag}`, 'app.py');
+    gitc(repo, 'restore', 'app.py');
+  }
+  assert.equal(stop().output, null);
+});
+
+test('Stop without a baseline blocks a published checkout with uncommitted submodule edits', () => {
+  const repo = makeRepo(), sub = makeRepo();
+  gitc(repo, '-c', 'protocol.file.allow=always', 'submodule', 'add', '-q', sub, 'lib');
+  const tip = commitAll(repo, 'add library');
+  gitc(repo, 'update-ref', 'refs/remotes/origin/main', tip);
+  const stop = () => hook('claude', 'Stop', hookPayload('submodule-reader', repo));
+  assert.equal(stop().output, null);
+  fs.appendFileSync(path.join(repo, 'lib', 'app.py'), '# local edit\n');
+  assert.equal(stop().output.decision, 'block');
+  const lib = path.join(repo, 'lib');
+  gitc(lib, 'update-index', '--assume-unchanged', 'app.py');
+  assert.equal(gitc(repo, 'status', '--porcelain', '--ignore-submodules=none'), '');
+  assert.equal(stop().output?.decision, 'block');
+  gitc(lib, 'update-index', '--no-assume-unchanged', 'app.py');
+  gitc(lib, 'restore', 'app.py');
+  gitc(lib, 'config', 'status.showUntrackedFiles', 'no');
+  fs.writeFileSync(path.join(lib, 'local.txt'), 'untracked');
+  assert.equal(gitc(repo, 'status', '--porcelain', '--ignore-submodules=none'), '');
+  assert.equal(stop().output?.decision, 'block');
+});
+
+test('Stop without a baseline ignores receipts in a replacement clone at a linked worktree path', () => {
+  const repo = makeRepo();
+  const linked = path.join(SCRATCH, 'stale-linked');
+  gitc(repo, 'worktree', 'add', '-q', '--detach', linked);
+  fs.renameSync(linked, linked + '-moved');
+  gitc(SCRATCH, 'clone', '-q', repo, linked);
+  common.updateLedger(HOME, common.repoIdentity(linked), l => {
+    l.receipts.push({ outcome: 'passed', commitSha: common.headSha(repo) });
+    return l;
+  });
+  assert.equal(hook('codex', 'Stop', hookPayload('stale-reader', repo)).output?.decision, 'block');
+});
+
+for (const seat of ['claude', 'codex']) {
+  test(`${seat} Stop without a baseline finds its candidate and native alias across linked worktrees and on an unborn branch`, () => {
+    const repo = makeRepo(), linked = path.join(SCRATCH, `owner-linked-${seat}`);
+    const sid = 'owning-session', native = 'native-session';
+    gitc(repo, 'worktree', 'add', '-q', '--detach', linked);
+    gitc(repo, 'update-ref', 'refs/remotes/origin/main', common.headSha(repo));
+    const { runId } = cli('code', ['begin', '--seat', seat, '--session', sid, '--cwd', linked]).json;
+    assert.equal(cli('code', ['bind-session', '--run', runId, '--seat', seat, '--session', sid, '--hook-session', native, '--reason', 'same originating session']).status, 0);
+    common.updateRun(HOME, runId, r => { r.status = 'awaiting_verdict'; return r; });
+    const stop = (session, cwd) => hook(seat, 'Stop', hookPayload(session, cwd));
+    for (const owner of [sid, native]) {
+      const result = stop(owner, repo);
+      assert.equal(result.note, 'blocked: verdict required');
+      assert.ok(result.output.reason.includes(runId));
+      assert.ok(result.output.reason.includes(linked));
+    }
+    assert.equal(stop('another-reader', repo).output, null);
+    gitc(linked, 'switch', '--orphan', 'empty');
+    assert.equal(stop(native, linked).note, 'blocked: verdict required');
+  });
+}
+
+test('Stop without a baseline accepts clean gitlinks without .gitmodules and rejects incomplete status', t => {
+  const repo = makeRepo(), sub = makeRepo(), lib = path.join(repo, 'lib');
+  gitc(repo, 'update-index', '--add', '--cacheinfo', `160000,${common.headSha(sub)},lib`);
+  gitc(repo, 'commit', '-q', '-m', 'include gitlink');
+  gitc(repo, 'update-ref', 'refs/remotes/origin/main', common.headSha(repo));
+  fs.mkdirSync(lib);
+  const stop = () => hook('codex', 'Stop', hookPayload('gitlink-reader', repo));
+  assert.equal(stop().output, null, 'unpopulated gitlink');
+  gitc(SCRATCH, 'clone', '-q', sub, lib);
+  assert.equal(stop().output, null, 'populated gitlink');
+  fs.appendFileSync(path.join(lib, 'app.py'), 'local edit');
+  assert.equal(stop().output?.decision, 'block');
+  gitc(lib, 'restore', 'app.py');
+  if (process.getuid?.() === 0) { t.diagnostic('chmod cannot restrict root'); return; }
+  for (const dir of [repo, lib]) {
+    const locked = path.join(dir, 'locked');
+    fs.mkdirSync(locked);
+    fs.writeFileSync(path.join(locked, 'local.txt'), 'unsaved work');
+    fs.chmodSync(locked, 0);
+    try {
+      const status = sh(dir, 'git', ['status', '--porcelain', '--untracked-files=all']);
+      assert.equal(status.stdout, '');
+      assert.ok(status.stderr.includes('locked'));
+      assert.equal(stop().output?.decision, 'block');
+    } finally {
+      fs.chmodSync(locked, 0o700);
+      fs.rmSync(locked, { recursive: true });
+    }
+  }
+});
+
+test('Stop without a baseline rechecks HEAD and edits after looking up a remote ref and skips receipts for dirty checkouts', () => {
+  const repo = makeRepo(), head = common.headSha(repo);
+  gitc(repo, 'update-ref', 'refs/remotes/origin/main', head);
+  gitc(repo, 'commit', '-q', '--allow-empty', '-m', 'unpublished');
+  const nextHead = common.headSha(repo);
+  gitc(repo, 'checkout', '-q', '--detach', head);
+  const shim = path.join(SCRATCH, 'stop-git');
+  fs.mkdirSync(shim);
+  const log = path.join(shim, 'worktree-list');
+  fs.writeFileSync(path.join(shim, 'git'), `#!/bin/sh
+if [ "$1 $2" = 'branch -r' ]; then
+  case "$TEST_MUTATION" in
+    head) "$TEST_GIT" update-ref HEAD "$TEST_HEAD" || exit 1 ;;
+    edit) touch changed.txt ;;
+  esac
+fi
+if [ "$1 $2" = 'worktree list' ]; then touch "$TEST_LIST_LOG"; fi
+exec "$TEST_GIT" "$@"
+`, { mode: 0o700 });
+  const stop = mutation => cli('hook', ['codex', 'Stop'], {
+    input: JSON.stringify(hookPayload('drift-reader', repo)),
+    env: { PATH: `${shim}:${process.env.PATH}`, TEST_GIT: fs.realpathSync(path.join(BIN, 'git')), TEST_HEAD: nextHead, TEST_LIST_LOG: log, TEST_MUTATION: mutation },
+  });
+  assert.equal(stop('head').json?.decision, 'block');
+  gitc(repo, 'checkout', '-q', '--detach', head);
+  assert.equal(stop('edit').json?.decision, 'block');
+  fs.rmSync(log, { force: true });
+  assert.equal(stop('').json?.decision, 'block');
+  assert.equal(fs.existsSync(log), false);
+});
+
 test('code Stop reports an active review instead of suggesting a duplicate candidate or deferral', () => {
   const repo = makeRepo();
   const sid = 'sess-active-review';
