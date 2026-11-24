@@ -723,6 +723,7 @@ test('paired review uses the saved snapshot and waits for the other relay after 
 test('bundled read-only relays distinguish in-worktree review artifacts from source edits', () => {
   const repo = makeRepo(), bin = path.join(SCRATCH, 'tripwire-cli'), xdg = path.join(bin, 'config');
   fs.mkdirSync(path.join(xdg, 'delegate-skills'), { recursive: true });
+  fs.writeFileSync(path.join(bin, 'package.json'), JSON.stringify({ type: 'module' }));
   fs.writeFileSync(path.join(xdg, 'delegate-skills', 'config.json'), JSON.stringify({ version: 'delegate-fleet.v1', lanes: {
     'plan-main': { implementer: 'claude', model: 'primary' }, 'plan-debate': { implementer: 'qoder', model: 'secondary' },
   } }));
