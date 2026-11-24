@@ -11,8 +11,8 @@ For scope, dirty artifacts, recovery, or hook verification, read [operations](op
 completes, reads the result with `wait --run "<run>" --max-wait 1s`. Every other host adds `--detach` and polls with `wait --run "<run>" --max-wait 60s`.
 
 1. Draft the complete plan. Claude uses its assigned plan file; other hosts may pass the plan on stdin (`--plan -`).
-   Each review attempt runs two serial, independent reviewers: lane `plan-main-<seat>` when configured, else
-   `plan-main`, followed by lane `plan-debate-<seat>` when configured, else `plan-debate`.
+   Both reviewers read the same plan snapshot in parallel. Each lane uses its seat-specific binding
+   (`plan-main-<seat>` or `plan-debate-<seat>`) when configured and otherwise uses `plan-main` or `plan-debate`.
    Implementers, models, and effort settings come from those fleet
    lane bindings. Both reports must complete. Their findings and assumptions are combined; secondary finding IDs
    are namespaced automatically, and the combined plan rating is the lower of the two ratings.

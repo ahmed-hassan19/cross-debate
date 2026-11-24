@@ -44,9 +44,9 @@ If it cannot, the final note tells you to run `/hooks` in Codex and trust them. 
 hook command changes, rerun the installer. Restart your agent.
 
 The installer asks for two reviewers. The **Lead reviewer** reviews code and pull requests first and makes the
-final call on which findings are real; on plans it gives the second independent opinion. Best fit: your most
+final call on which findings are real. Its plan findings appear second in the combined report. Best fit: your most
 capable, deep-thinking model with high effort. The **Challenger** questions the Lead's findings and adds missed
-problems; on plans it gives the first independent opinion. Best fit: a capable model from a different family than
+problems. Its plan findings appear first. Best fit: a capable model from a different family than
 the Lead, such as Codex when the Lead is Claude; very small models tend to just agree. When you choose reviewers yourself,
 you pick them for plans first, then either reuse them for code reviews or choose code reviewers separately, for example
 lighter models or lower effort. Model menus start with **CLI default**,
@@ -106,7 +106,7 @@ Standalone findings have no orchestrator verdict. Ask your agent to verify them 
 
 ## What happens next
 
-Plan review runs two separate, independent passes. Code and PR review use a main reviewer, a debate reviewer
+Plan review runs two independent reviewers in parallel on the same plan snapshot. Code and PR review use a main reviewer, a debate reviewer
 that challenges findings, and a final pass by the main reviewer when there are findings to settle.
 In plan and candidate workflows, your agent verifies the evidence and can run up to three rounds.
 Agreement between reviewers is not proof.

@@ -153,7 +153,7 @@ export function seatPairs(lanes, seats) {
     const primary = first?.implementer ?? null;
     const secondary = second?.implementer ?? null;
     const repeatsPrimary = secondary && secondary === primary && (second.model ?? null) === (first.model ?? null);
-    return `seat ${seat}: plan reviewers ${primary ?? 'missing'} then ${secondary ?? 'missing'}${repeatsPrimary ? ' (secondary repeats the primary reviewer: supported, with limited model diversity)' : secondary === seat ? " (secondary is the seat's own CLI; review runs in a separate session)" : ''}`;
+    return `seat ${seat}: plan reviewers ${primary ?? 'missing'} and ${secondary ?? 'missing'}${repeatsPrimary ? ' (secondary repeats the primary reviewer: supported, with limited model diversity)' : secondary === seat ? " (secondary is the seat's own CLI; review runs in a separate session)" : ''}`;
   });
 }
 async function delegateConfig() {

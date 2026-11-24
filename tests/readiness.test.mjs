@@ -167,7 +167,7 @@ test('readiness and pairing use the second plan seat override', async () => {
   assert.ok(ready.checks.some(check => check.lane === 'plan-debate-codex'));
   assert.ok(!ready.checks.some(check => check.lane === 'plan-debate'));
   const { seatPairs } = await import('../skills/cross-debate/scripts/setup.mjs');
-  assert.match(seatPairs(ready.lanes, ['codex'])[0], /plan reviewers claude then codex/);
+  assert.match(seatPairs(ready.lanes, ['codex'])[0], /plan reviewers claude and codex/);
   assert.ok((await reviewerReadiness(repo, { seats: ['claude'] })).checks.some(check => check.lane === 'plan-debate'));
 });
 

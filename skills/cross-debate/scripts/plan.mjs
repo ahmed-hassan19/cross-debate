@@ -5,17 +5,18 @@
 
 import fs from 'node:fs';
 import path from 'node:path';
+import os from 'node:os';
 import crypto from 'node:crypto';
 import {
-  RUN_SCHEMA, MAX_ROUNDS, PLAN_LANES, SEATS, CLI, SKILL_DIR, cliCommand, RECEIPT_TTL_MS, usage, nowIso, log, printJson, isPidAlive, sleepMs,
-  debateHome, ensureHome, requireWritableHome, readJsonIfExists, writeJson, createRun, loadRun, updateRun, runDir,
+  RUN_SCHEMA, MAX_ROUNDS, PLAN_LANES, SEATS, CLI, SKILL_DIR, cliCommand, RECEIPT_TTL_MS, usage, nowIso, printJson, isPidAlive, sleepMs,
+  debateHome, ensureHome, requireWritableHome, writeAtomic, writeJson, createRun, loadRun, updateRun, runDir,
   loadSession, updateSession, validateSeat, sessionIdFor, sessionKey, validateRunId, resolveCwdArg, readPlanArg,
-  parseDuration, splitPlan, renderWithBlock, runRelay, spawnDetached,
+  parseDuration, splitPlan, renderWithBlock, runRelayAsync, spawnDetached,
   addUsage, emptyUsage,
   repoIdentity, usageFromRelayDir, extractJson, validatePlanReview, validateVerdictDoc, verdictDeclaresChange, missedDeclaresChange,
   orchestratorUsageFromTranscript, upsertStatsRow, statsRowFromRun, statsCommand, parseArgs, loadLaneConfig,
 } from './lib/common.mjs';
-import { failReviewAttempt, needsUserDecision, validateResume, authorizeResume, recordSelfReview, requireFinishDecision, resolveReviewOverride, reviewTooling, modelIdentity, orchestratorModel, reviewerLabel } from './lib/recovery.mjs';
+import { failureDetails, failReviewAttempt, needsUserDecision, validateResume, authorizeResume, recordSelfReview, requireFinishDecision, resolveReviewOverride, reviewTooling, modelIdentity, orchestratorModel, reviewerLabel } from './lib/recovery.mjs';
 import { prepareJudge, judgeAttempt, judgeDoc, failJudge, setJudgePid, runJudgeAttempt, validateJudgeRulings } from './lib/plan-judge.mjs';
 export const TEMPLATE_PATH = path.join(SKILL_DIR, 'assets', 'review-brief.md');
 const DEFAULT_TIMEOUT = '20m';
@@ -68,6 +69,7 @@ export function reviewDoc(run, extra = {}) {
     runStatus: run.status, stopReason: run.stopReason, retryUsed: run.retryUsed,
     retryAvailable: run.status === 'review_failed' && !run.retryUsed,
     needsUserDecision: needsUserDecision(run), failureDetails: attempt?.failureDetails ?? null,
+    ...(attempt?.agents?.some(a => a.failureDetails) ? { reviewerFailures: attempt.agents.map(a => a.failureDetails).filter(Boolean) } : {}),
     reviewer: attempt ? attempt.reviewer : null,
     reviewers,
     reviewerCount: reviewers.length,
@@ -292,6 +294,10 @@ export function mergePlanReviews(run, reports) {
     ratings: normalized.map(r => ({ role: r.role, rating: r.review.rating })),
   };
 }
+function reportText(dir) {
+  try { return fs.readFileSync(path.join(dir, 'result.json'), 'utf8'); }
+  catch (error) { if (error.code === 'ENOENT') return null; throw error; }
+}
 /** Read one or more relay artifact directories into the run. Rejects stale round/attempt references. */
 export function ingestPlanReview(home, runId, roundNo, attemptNo, relayInput, options = {}) {
   return updateRun(home, runId, (run) => {
@@ -315,54 +321,89 @@ export function ingestPlanReview(home, runId, roundNo, attemptNo, relayInput, op
     }
     const reports = [];
     const agents = [];
+    const failures = [];
     let combinedUsage = null;
     let combinedCost = 0;
     let costKnown = false;
-    let combinedSeconds = 0;
-    const saveMetrics = () => {
-      attempt.agents = agents;
-      attempt.usage = combinedUsage;
-      attempt.cost = costKnown ? combinedCost : null;
-      attempt.seconds = combinedSeconds || null;
-      attempt.reviewerSessionId = agents[0]?.sessionId ?? null;
-      attempt.coverage = coverageForAgents(agents);
-      attempt.reviewers = reviewers;
-      attempt.reviewer = reviewers[0] || attempt.reviewer;
-    };
-    const failReviewer = (entry, failure, message, result) => {
-      saveMetrics();
-      failAttempt(run, round, attempt, failure, `${entry.role} reviewer: ${message}`, result ? { ...result, stderrTail: entry.stderrTail || result.stderrTail } : null);
-      if (attempt.failureDetails) attempt.failureDetails.stage = entry.role;
-      return run;
-    };
-    for (const entry of entries) {
+    entries.forEach(entry => {
       const reviewer = entry.reviewer;
       const relayDir = entry.relayDir;
-      const info = usageFromRelayDir(reviewer.implementer, relayDir);
-      Object.assign(reviewer, modelIdentity(relayDir, reviewer.model));
-      const result = readJsonIfExists(path.join(relayDir, 'result.json'));
-      const seconds = secondsFromResult(result, entry.seconds);
-      const agent = { ...reviewer, stage: entry.role, ...info, status: result?.status || 'missing', seconds, usage: info.usage, cost: info.cost, coverage: info.coverage };
+      const agent = { ...reviewer, stage: entry.role, status: 'missing', coverage: 'unreported', seconds: entry.seconds ?? null };
       agents.push(agent);
-      if (info.usage) combinedUsage = addUsage(combinedUsage || emptyUsage(), info.usage);
-      if (typeof info.cost === 'number') { combinedCost += info.cost; costKnown = true; }
-      if (typeof seconds === 'number') combinedSeconds += seconds;
-      if (!result) return failReviewer(entry, 'relay', `relay exited ${entry.exitCode} without result.json`, null);
-      if (result.readOnlyViolation === true) return failReviewer(entry, 'read_only_violation', 'relay reported a read-only violation; output rejected', result);
-      if (Number.isInteger(entry.exitCode) && entry.exitCode !== 0) return failReviewer(entry, 'relay', `relay exited ${entry.exitCode}`, result);
-      if (result.status !== 'completed') return failReviewer(entry, result.status === 'timeout' ? 'timeout' : 'relay', `relay status ${result.status}${result.error ? `: ${result.error}` : ''}`, result);
-      if (info.coverage === 'incomplete') attempt.warnings.push(`${entry.role}: read-only tripwire coverage incomplete (readOnlyViolation null)`);
-      if (info.coverage === 'unreported') attempt.warnings.push(`${entry.role}: read-only tripwire coverage unreported by this relay`);
+      let result;
+      const fail = (kind, message) => {
+        const error = `${entry.role} reviewer: ${message}`;
+        agent.failureDetails = failureDetails({ ...result, stderrTail: entry.stderrTail || result?.stderrTail }, kind, error, entry.role, { invalidReport: result?.status === 'completed' });
+        failures.push({ kind, error, details: agent.failureDetails });
+      };
+      if (entry.archiveError) attempt.warnings.push(entry.archiveError);
+      try {
+        if (entry.launchError) return fail('internal', entry.launchError);
+        const text = reportText(relayDir);
+        if ('resultAtExit' in entry && text !== entry.resultAtExit) {
+          agent.status = 'changed';
+          agent.coverage = 'violation';
+          if (entry.resultAtExit !== null) writeAtomic(path.join(relayDir, 'result-at-exit.json'), entry.resultAtExit);
+          return fail('read_only_violation', 'relay report changed after its reviewer exited');
+        }
+        result = text === null ? null : JSON.parse(text);
+        if (result && entry.staging && !entry.archiveError) {
+          for (const [key, value] of Object.entries(result)) {
+            if (key.endsWith('Path') && typeof value === 'string' && value.startsWith(entry.staging + path.sep)) {
+              result[key] = path.join(relayDir, path.relative(entry.staging, value));
+            }
+          }
+          writeJson(path.join(relayDir, 'result.json'), result);
+        }
+        agent.status = result?.status ?? 'missing';
+        agent.seconds = secondsFromResult(result, entry.seconds);
+        Object.assign(reviewer, modelIdentity(relayDir, reviewer.model));
+        Object.assign(agent, reviewer, usageFromRelayDir(reviewer.implementer, relayDir));
+      } catch (error) {
+        if (agent.coverage === 'violation') return fail('read_only_violation', `changed relay report; could not save the original: ${error.message}`);
+        if (result?.readOnlyViolation !== true && result?.status !== 'timeout') return fail('internal', error.message);
+      }
+      if (agent.usage) combinedUsage = addUsage(combinedUsage || emptyUsage(), agent.usage);
+      if (typeof agent.cost === 'number') { combinedCost += agent.cost; costKnown = true; }
+      if (result?.readOnlyViolation === true) {
+        agent.coverage = 'violation';
+        return fail('read_only_violation', 'relay reported a read-only violation; output rejected');
+      }
+      if (entry.archiveError) return fail('internal', entry.archiveError);
+      if (!result) return fail('relay', `relay exited ${entry.exitCode} without result.json`);
+      if (result.status === 'timeout') return fail('timeout', 'relay watchdog timed out');
+      if (Number.isInteger(entry.exitCode) && entry.exitCode !== 0) return fail('relay', `relay exited ${entry.exitCode}`);
+      if (result.status !== 'completed') return fail('relay', `relay status ${result.status}${result.error ? `: ${result.error}` : ''}`);
+      if (agent.coverage === 'incomplete') attempt.warnings.push(`${entry.role}: read-only tripwire coverage incomplete (readOnlyViolation null)`);
+      if (agent.coverage === 'unreported') attempt.warnings.push(`${entry.role}: read-only tripwire coverage unreported by this relay`);
       const doc = extractJson(result.finalMessage);
-      if (!doc) return failReviewer(entry, 'bad_output', 'reviewer returned no parseable JSON block', result);
+      if (!doc) return fail('bad_output', 'reviewer returned no parseable JSON block');
       const validation = validatePlanReview(doc, { round: roundNo, usedFindingIds: allFindingIds(run), usedAssumptionIds: allAssumptionIds(run), priorContestIds: priorContestIds(run, roundNo) });
-      if (!validation.ok) return failReviewer(entry, 'bad_output', `invalid review: ${validation.errors.join('; ')}`, result);
+      if (!validation.ok) return fail('bad_output', `invalid review: ${validation.errors.join('; ')}`);
       attempt.warnings.push(...validation.warnings.map(w => `${entry.role}: ${w}`));
       reports.push({ role: entry.role, reviewer, review: validation.doc });
+    });
+    attempt.agents = agents;
+    attempt.usage = combinedUsage;
+    attempt.cost = costKnown ? combinedCost : null;
+    const durations = agents.map(a => a.seconds).filter(Number.isFinite);
+    attempt.seconds = durations.length ? durations.reduce((a, b) => a + b, 0) : null;
+    attempt.reviewerSessionId = agents[0]?.sessionId ?? null;
+    attempt.coverage = coverageForAgents(agents);
+    attempt.reviewers = reviewers;
+    attempt.reviewer = reviewers[0] || attempt.reviewer;
+    if (attempt.coverage === 'violation') attempt.warnings.push('Investigate and remediate the read-only violation before retrying.');
+    const failure = failures.find(f => f.details.failureClass === 'rate_limited') || failures.find(f => f.kind === 'read_only_violation') || failures[0];
+    if (failure) {
+      attempt.failureDetails = failure.details;
+      failAttempt(run, round, attempt, failure.kind, failure.error);
+      return run;
     }
-    if (reports.length !== reviewers.length) return failReviewer(entries[reports.length] || entries.at(-1), 'relay', `expected ${reviewers.length} reviewer reports but received ${reports.length}`, null);
+    if (reports.length !== reviewers.length) {
+      failAttempt(run, round, attempt, 'relay', `expected ${reviewers.length} reviewer reports but received ${reports.length}`);
+      return run;
+    }
     const merged = mergePlanReviews(run, reports);
-    saveMetrics();
     attempt.status = 'completed';
     attempt.finishedAt = nowIso();
     round.review = { ...merged, attempt: attemptNo };
@@ -371,7 +412,7 @@ export function ingestPlanReview(home, runId, roundNo, attemptNo, relayInput, op
   });
 }
 /** Build the brief, run the relay, ingest. Marks the attempt failed on any internal error. */
-export function runAttempt(home, runId, roundNo, attemptNo) {
+export async function runAttempt(home, runId, roundNo, attemptNo) {
   const run = loadRun(home, runId);
   const round = run.rounds[roundNo - 1];
   const attempt = round && round.attempts[attemptNo - 1];
@@ -379,29 +420,59 @@ export function runAttempt(home, runId, roundNo, attemptNo) {
   const dir = runDir(home, runId);
   const attemptDir = path.join(dir, attempt.dir);
   try {
-    const planBody = fs.readFileSync(path.join(dir, round.planPath), 'utf8');
+    const snapshot = splitPlan(fs.readFileSync(path.join(dir, round.planPath), 'utf8'));
+    if (snapshot.error || snapshot.digest !== round.planDigest) throw new Error('stored plan snapshot changed before review');
+    const planBody = snapshot.body;
     const reviewers = reviewersForAttempt(attempt);
-    const results = [];
-    for (let i = 0; i < reviewers.length; i++) {
-      const reviewer = reviewers[i];
+    const repo = repoIdentity(run.cwd);
+    const inWorktree = dir => {
+      const relative = path.relative(repo.worktreeRoot, fs.realpathSync(dir));
+      return relative.split(path.sep)[0] !== '..' && !path.isAbsolute(relative);
+    };
+    const stage = repo && reviewers.length > 1 && inWorktree(attemptDir);
+    const stageParent = stage && [os.tmpdir(), os.homedir()].find(dir => !inWorktree(dir));
+    if (stage && !stageParent) throw new Error('set the OS temporary directory outside the checkout for paired plan review');
+    const entries = reviewers.map((reviewer, i) => {
       const role = reviewer.role || (i === 0 ? 'primary' : `secondary-${i}`);
       const suffix = i === 0 ? '' : `-${role}`;
       const briefPath = path.join(attemptDir, `brief${suffix}.md`);
-      const brief = buildBrief(run, roundNo, planBody, reviewer, role);
-      fs.writeFileSync(briefPath, brief, { mode: 0o600 });
-      updateRun(home, runId, cur => {
-        const at = cur.rounds[roundNo - 1].attempts[attemptNo - 1];
-        (at.promptSizes ||= []).push({ role, planBytes: Buffer.byteLength(planBody), historyBytes: Buffer.byteLength(renderHistory(run, roundNo)), briefBytes: Buffer.byteLength(brief) });
-        return cur;
-      });
       const relayDir = path.join(attemptDir, `relay${suffix}`);
-      fs.mkdirSync(relayDir, { recursive: true, mode: 0o700 });
-      const extraArgs = reviewer.implementer === 'codex' && !repoIdentity(run.cwd) ? ['--skip-git-repo-check'] : [];
-      const r = runRelay({ implementer: reviewer.implementer, lane: reviewer.lane, briefPath, cwd: run.cwd, outDir: relayDir, timeout: run.timeout, extraArgs });
-      results.push({ role, reviewer, relayDir, exitCode: r.exitCode, seconds: r.seconds, stderrTail: r.stderrTail });
-      if (r.exitCode !== 0 || !r.result || r.result.status !== 'completed' || !extractJson(r.result.finalMessage)) break;
+      const entry = { role, reviewer, relayDir };
+      try {
+        const brief = buildBrief(run, roundNo, planBody, reviewer, role);
+        fs.writeFileSync(briefPath, brief, { mode: 0o600 });
+        updateRun(home, runId, cur => {
+          const at = cur.rounds[roundNo - 1].attempts[attemptNo - 1];
+          (at.promptSizes ||= []).push({ role, planBytes: Buffer.byteLength(planBody), historyBytes: Buffer.byteLength(renderHistory(run, roundNo)), briefBytes: Buffer.byteLength(brief) });
+          return cur;
+        });
+        fs.mkdirSync(relayDir, { recursive: true, mode: 0o700 });
+        if (stage) entry.staging = fs.mkdtempSync(path.join(stageParent, 'debate-plan-relay-'));
+        const extraArgs = reviewer.implementer === 'codex' && !repo ? ['--skip-git-repo-check'] : [];
+        entry.options = { implementer: reviewer.implementer, lane: reviewer.lane, briefPath, cwd: run.cwd, outDir: entry.staging || relayDir, timeout: run.timeout, extraArgs };
+      } catch (error) { entry.launchError = error.message; }
+      return entry;
+    });
+    await Promise.all(entries.map(async entry => {
+      if (entry.launchError) return;
+      try {
+        Object.assign(entry, await runRelayAsync(entry.options));
+        entry.resultAtExit = reportText(entry.options.outDir);
+      } catch (error) { entry.launchError = error.message; }
+    }));
+    for (const entry of entries.filter(e => e.staging)) {
+      try {
+        if (!fs.lstatSync(entry.relayDir).isDirectory()) throw new Error('relay archive directory was replaced');
+        for (const file of fs.readdirSync(entry.staging)) {
+          fs.cpSync(path.join(entry.staging, file), path.join(entry.relayDir, file), { recursive: true, force: false, errorOnExist: true, verbatimSymlinks: true });
+        }
+        fs.rmSync(entry.staging, { recursive: true });
+      } catch (error) {
+        entry.relayDir = entry.staging;
+        entry.archiveError = `artifacts retained at ${entry.staging}: ${error.message}`;
+      }
     }
-    return ingestPlanReview(home, runId, roundNo, attemptNo, results);
+    return ingestPlanReview(home, runId, roundNo, attemptNo, entries);
   } catch (e) {
     return updateRun(home, runId, (cur) => {
       const rd = cur.rounds[roundNo - 1];
@@ -605,7 +676,7 @@ export function checkReceipt(run, { seat, sessionId, generation, planText, now =
 
 // ---------- commands ----------
 
-function reviewCommand(flags) {
+async function reviewCommand(flags) {
   if (flags.reviewerLane && !flags.resume) throw usage('--reviewer-lane requires a user-authorized resume');
   const home = debateHome();
   requireWritableHome(home);
@@ -657,7 +728,7 @@ function reviewCommand(flags) {
     return 0;
   }
   setAttemptPid(home, run.runId, round.round, attempt.attempt, process.pid);
-  const done = runAttempt(home, run.runId, round.round, attempt.attempt);
+  const done = await runAttempt(home, run.runId, round.round, attempt.attempt);
   printJson(reviewDoc(done));
   return 0;
 }
@@ -718,9 +789,9 @@ function finishCommand(flags) {
   printJson(finishPlan(home, runId, opts));
   return 0;
 }
-function workerCommand(flags) {
+async function workerCommand(flags) {
   const home = debateHome();
-  runAttempt(home, validateRunId(flags.run), Number(flags.round), Number(flags.attempt));
+  await runAttempt(home, validateRunId(flags.run), Number(flags.round), Number(flags.attempt));
   return 0;
 }
 

@@ -11,10 +11,10 @@ then lets you reuse them for the code lanes or choose the code lanes separately.
 
 | Lane | Installer role | Role |
 |---|---|---|
-| `plan-main` | Challenger | First independent plan-review pass |
-| `plan-main-<seat>` | Challenger | Overrides that first pass for one host |
-| `plan-debate` | Lead reviewer | Second independent plan-review pass |
-| `plan-debate-<seat>` | Lead reviewer | Overrides that second pass for one host |
+| `plan-main` | Challenger | Primary plan reviewer |
+| `plan-main-<seat>` | Challenger | Overrides the primary plan reviewer for one host |
+| `plan-debate` | Lead reviewer | Secondary plan reviewer |
+| `plan-debate-<seat>` | Lead reviewer | Overrides the secondary plan reviewer for one host |
 | `plan-judge` | Optional advisor | Explicit plan-dispute escalation; shared across hosts |
 | `review-main` | Lead reviewer | Main and final code/PR reviewer |
 | `review-debate` | Challenger | Challenges code/PR findings and can add findings |
@@ -36,7 +36,7 @@ These are complete `delegate-fleet.v1` documents, validated by the bundled valid
 - [One CLI](../examples/single-cli.json), two separate passes using Codex. Identical choices reduce model diversity.
 - [OpenCode model template](../examples/opencode-template.json), replace `provider/model-id` and `variant-name`
   with values from your OpenCode configuration before use.
-- [Seat override](../examples/seat-override.json), changes only Claude Code's first plan reviewer in this example.
+- [Seat override](../examples/seat-override.json), changes only Claude Code's primary plan reviewer in this example.
 
 Merge only the intended lane entries into your existing settings; do not replace a fleet file containing
 other lanes with an example. To validate a draft from a clone without changing settings:
