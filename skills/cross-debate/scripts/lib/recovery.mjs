@@ -13,10 +13,10 @@ export function diagnostic(text) {
       .replace(/(https?:\/\/)[^\s/@]+:[^\s/@]+@/g, '$1[redacted]@');
   }).join('\n').slice(0, 2048);
 }
-export function failureDetails(result = {}, failure = 'internal', error = '', stage = null) {
-  const raw = `${result.status || ''}\n${result.error || ''}\n${result.finalMessage || ''}\n${result.stderrTail || ''}\n${error}`;
+export function failureDetails(result = {}, failure = 'internal', error = '', stage = null, { invalidReport = false } = {}) {
+  const raw = [result.status, result.error, invalidReport ? '' : result.finalMessage, result.stderrTail, invalidReport ? '' : error].join('\n');
   let failureClass = failure;
-  if (failure !== 'read_only_violation') {
+  if (!['read_only_violation', 'timeout'].includes(failure)) {
     if (/permission requested: external_directory|auto-rejecting/i.test(raw)) failureClass = 'sandbox_denied';
     else if (/rate.?limit|hit your .*limit|quota|too many requests|\b429\b/i.test(raw)) failureClass = 'rate_limited';
     else if (/\w+_unavailable|ENOENT|command not found/i.test(raw)) failureClass = 'cli_unavailable';
@@ -32,7 +32,7 @@ export function failReviewAttempt(run, round, attempt, failure, error, result = 
   attempt.failure = failure;
   attempt.error = diagnostic(error);
   if (result || !attempt.failureDetails) attempt.failureDetails = failureDetails(result || {}, failure, error);
-  if (run.kind === 'plan') attempt.failureDetails.stage = 'review';
+  if (run.kind === 'plan') attempt.failureDetails.stage ??= 'review';
   attempt.finishedAt = nowIso();
   // A rate-limited reviewer will not recover within the retry window; spend the retry and ask the user instead.
   const rateLimited = !run.retryUsed && attempt.failureDetails.failureClass === 'rate_limited';
@@ -59,7 +59,8 @@ export function validateResume(run, flags, home) {
   if (flags.seat !== run.seat || flags.session !== run.sessionId) throw usage('resume requires the original seat/session; reopen the originating thread (cross-session transfer is unsupported)');
   const round = run.rounds.at(-1);
   if (!needsUserDecision(run) || !['stopped', 'finished'].includes(run.status) || (run.stopReason !== 'reviewer_failed' && round.stopReason !== 'reviewer_failed')) throw usage('resume requires an exhausted failed current round; running or reviewed rounds cannot resume');
-  if (round.attempts.at(-1).failure === 'read_only_violation' && !/remediat|investigat/i.test(flags.reason)) throw usage('investigate and remediate the read-only violation first; include the resolution in --reason');
+  const attempt = round.attempts.at(-1);
+  if ((attempt.failure === 'read_only_violation' || attempt.coverage === 'violation') && !/remediat|investigat/i.test(flags.reason)) throw usage('investigate and remediate the read-only violation first; include the resolution in --reason');
   if (run.kind === 'plan') {
     const snapshot = fs.readFileSync(path.join(runDir(home, run.runId), round.planPath), 'utf8');
     if (splitPlan(snapshot).digest !== round.planDigest) throw usage('stored plan snapshot changed; cannot resume');

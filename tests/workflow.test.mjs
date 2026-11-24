@@ -128,11 +128,38 @@ function runPairedReviewRound(runId, body, primaryDoc, secondaryDoc) {
     { role: 'secondary-1', reviewer: SECOND_REVIEWER, relayDir: secondaryRelay, exitCode: 0, seconds: 240 },
   ]);
 }
-function installReviewRelay(root, implementer, doc) {
+function installPairedRelay(root, implementer, doc) {
   const scripts = path.join(root, `${implementer}-delegate`, 'scripts');
   fs.mkdirSync(scripts, { recursive: true });
   const message = ['Here you go', '```json', JSON.stringify(doc, null, 2), '```', ''].join('\n');
-  fs.writeFileSync(path.join(scripts, 'relay.mjs'), `import fs from 'node:fs'; import path from 'node:path'; const args = process.argv.slice(2); const out = args[args.indexOf('--out-dir') + 1]; fs.mkdirSync(out, {recursive:true}); fs.writeFileSync(path.join(out, 'result.json'), JSON.stringify({status:'completed', finalMessage:${JSON.stringify(message)}, readOnlyViolation:false, threadId:'stub', sessionId:'stub', model:${JSON.stringify(implementer)}}));`);
+  fs.writeFileSync(path.join(scripts, 'relay.mjs'), `import fs from 'node:fs';
+import path from 'node:path';
+import { setTimeout } from 'node:timers/promises';
+const args = process.argv.slice(2);
+if (args.includes('--help')) { console.log('--read-only'); process.exit(0); }
+const out = args[args.indexOf('--out-dir') + 1];
+const me = ${JSON.stringify(implementer)}, peer = me === 'codex' ? 'claude' : 'codex';
+const marker = name => path.join(path.dirname(out), name);
+async function waitFor(name) {
+  const deadline = Date.now() + 15000;
+  while (!fs.existsSync(marker(name))) {
+    if (Date.now() >= deadline) throw new Error('timed out waiting for ' + name);
+    await setTimeout(20);
+  }
+}
+fs.writeFileSync(marker(me + '.started'), '');
+await waitFor(peer + '.started');
+if (me !== process.env.FIRST_RELAY) {
+  await waitFor(peer + '.finished');
+  if (process.env.HOLD_RELAY) await waitFor('release');
+}
+const failed = process.env.FAIL_RELAY === me;
+fs.writeFileSync(path.join(out, 'result.json'), JSON.stringify({ status: failed ? 'failed' : 'completed',
+  finalMessage: failed ? 'Reviewer unavailable' : ${JSON.stringify(message)}, readOnlyViolation: false }));
+fs.appendFileSync(marker('finished-order'), me + '\\n');
+fs.writeFileSync(marker(me + '.finished'), '');
+process.exitCode = failed ? 1 : 0;
+`);
 }
 function hookPayload(sessionId, cwd, extra = {}) { return { session_id: sessionId, cwd, transcript_path: path.join(SCRATCH, 'transcript.jsonl'), permission_mode: 'default', hook_event_name: 'Stop', ...extra }; }
 function hook(seat, event, payload, opts = {}) { return hooks.handleHook(seat, event, payload, { home: HOME, env: { ...process.env, ...(opts.env || {}) }, now: opts.now }); }
@@ -619,38 +646,129 @@ test('plan review pairs the seat-specific reviewer with plan-debate and combines
   assert.equal(stopped.stopReason, 'no_changes');
 });
 
-test('runAttempt launches the two configured plan reviewers and records separate artifacts', () => {
+test('detached plan wait joins overlapping reviewers and merges the secondary-first results in role order', async () => {
   const relayRoot = path.join(SCRATCH, 'paired-relays');
   const primary = readFix('plan-review-round1.json');
-  installReviewRelay(relayRoot, 'codex', primary);
-  installReviewRelay(relayRoot, 'claude', primary);
-  const previousRoot = process.env.DELEGATE_SKILLS_DIR;
-  process.env.DELEGATE_SKILLS_DIR = relayRoot;
+  installPairedRelay(relayRoot, 'codex', primary);
+  installPairedRelay(relayRoot, 'claude', { ...primary, summary: 'Secondary review finished first.' });
+  const source = path.join(SCRATCH, 'parallel-plan.md');
+  fs.writeFileSync(source, PLAN_BODY);
+  const started = cli('plan', ['review', '--new', '--seat', SEAT, '--session', 'parallel-wait', '--cwd', SCRATCH, '--plan', source, '--detach'],
+    { env: { DELEGATE_SKILLS_DIR: relayRoot, FIRST_RELAY: 'claude', HOLD_RELAY: '1' } });
+  assert.equal(started.json?.status, 'running', started.stdout + started.stderr);
+  const { runId, artifacts: { attemptDir } } = started.json;
   try {
-    const runId = newPlanRun();
-    plan.startRound(HOME, runId, PLAN_BODY);
-    plan.startAttempt(HOME, runId, [REVIEWER, SECOND_REVIEWER]);
-    const done = plan.runAttempt(HOME, runId, 1, 1);
-    const attempt = done.rounds[0].attempts[0];
-    const attemptDir = path.join(common.runDir(HOME, runId), attempt.dir);
-    assert.equal(attempt.status, 'completed');
-    assert.equal(attempt.agents.length, 2);
-    assert.equal(attempt.promptSizes.length, 2);
-    for (const [i, name] of ['brief.md', 'brief-secondary-1.md'].entries()) {
-      const brief = fs.readFileSync(path.join(attemptDir, name), 'utf8');
-      assert.equal(attempt.promptSizes[i].briefBytes, Buffer.byteLength(brief));
-      assert.equal(attempt.promptSizes[i].planBytes, Buffer.byteLength(PLAN_BODY));
-      assert.doesNotMatch(brief, /promptSizes|planBytes|historyBytes|briefBytes/);
+    const deadline = Date.now() + 10000;
+    while (!fs.existsSync(path.join(attemptDir, 'claude.finished'))) {
+      assert.ok(Date.now() < deadline, 'secondary must finish while primary is running');
+      await new Promise(resolve => setTimeout(resolve, 20));
     }
-    assert.equal(common.statsRowFromRun(done).promptSizes.length, 2);
-    assert.equal(done.rounds[0].review.reviews.length, 2);
-    assert.equal(fs.existsSync(path.join(attemptDir, 'brief.md')), true);
-    assert.equal(fs.existsSync(path.join(attemptDir, 'brief-secondary-1.md')), true);
-    assert.equal(fs.existsSync(path.join(attemptDir, 'relay', 'result.json')), true);
-    assert.equal(fs.existsSync(path.join(attemptDir, 'relay-secondary-1', 'result.json')), true);
+    assert.equal(cli('plan', ['wait', '--run', runId, '--max-wait', '1s']).json.status, 'running');
   } finally {
-    if (previousRoot === undefined) delete process.env.DELEGATE_SKILLS_DIR;
-    else process.env.DELEGATE_SKILLS_DIR = previousRoot;
+    fs.writeFileSync(path.join(attemptDir, 'release'), '');
+  }
+  const waited = cli('plan', ['wait', '--run', runId, '--max-wait', '10s']);
+  assert.equal(waited.json?.runStatus, 'awaiting_verdict', waited.stdout + waited.stderr);
+  assert.deepEqual(waited.json.reviews.map(r => [r.role, r.summary]), [['primary', primary.summary], ['secondary-1', 'Secondary review finished first.']]);
+  assert.deepEqual(waited.json.findings.map(f => f.id), ['F1', 'F2', 'S1', 'S2']);
+  assert.equal(fs.readFileSync(path.join(attemptDir, 'finished-order'), 'utf8'), 'claude\ncodex\n');
+  const done = common.loadRun(HOME, runId);
+  const attempt = done.rounds[0].attempts[0];
+  assert.equal(attempt.status, 'completed');
+  assert.equal(attempt.promptSizes.length, 2);
+  for (const [i, name] of ['brief.md', 'brief-secondary-1.md'].entries()) {
+    const brief = fs.readFileSync(path.join(attemptDir, name), 'utf8');
+    assert.equal(attempt.promptSizes[i].briefBytes, Buffer.byteLength(brief));
+    assert.equal(attempt.promptSizes[i].planBytes, Buffer.byteLength(PLAN_BODY));
+    assert.ok(brief.includes(PLAN_BODY.trimEnd()));
+    assert.doesNotMatch(brief, /promptSizes|planBytes|historyBytes|briefBytes/);
+  }
+  assert.equal(common.statsRowFromRun(done).promptSizes.length, 2);
+  assert.equal(fs.existsSync(path.join(attemptDir, 'relay', 'result.json')), true);
+  assert.equal(fs.existsSync(path.join(attemptDir, 'relay-secondary-1', 'result.json')), true);
+});
+
+test('paired review uses the saved snapshot and waits for the other relay after an early primary failure', () => {
+  const relayRoot = path.join(SCRATCH, 'paired-failure');
+  for (const name of ['codex', 'claude']) installPairedRelay(relayRoot, name, readFix('plan-review-round1.json'));
+  const source = path.join(SCRATCH, 'saved-snapshot.md');
+  fs.writeFileSync(source, PLAN_BODY);
+  const runId = newPlanRun({ sourcePath: source, origin: 'file' });
+  plan.startRound(HOME, runId, fs.readFileSync(source, 'utf8'));
+  plan.startAttempt(HOME, runId, [REVIEWER, SECOND_REVIEWER]);
+  fs.writeFileSync(source, PLAN_REVISED);
+  const worker = cli('plan', ['_worker', '--run', runId, '--round', '1', '--attempt', '1'],
+    { env: { DELEGATE_SKILLS_DIR: relayRoot, FIRST_RELAY: 'codex', FAIL_RELAY: 'codex' } });
+  assert.equal(worker.status, 0, worker.stdout + worker.stderr);
+  const result = cli('plan', ['wait', '--run', runId, '--max-wait', '1s']);
+  assert.equal(result.json?.runStatus, 'review_failed', result.stdout + result.stderr);
+  assert.equal(result.json.retryAvailable, true);
+  assert.equal(result.json.reviewerFailures[0].stage, 'primary');
+  assert.equal(result.json.failureDetails.failureClass, 'service_error', 'a silent nonzero exit is not a timeout');
+  const round = common.loadRun(HOME, result.json.runId).rounds[0];
+  assert.deepEqual(round.attempts[0].agents.map(a => [a.stage, a.status]), [['primary', 'failed'], ['secondary-1', 'completed']]);
+  assert.equal(round.review, null);
+  assert.equal(fs.readFileSync(path.join(result.json.artifacts.attemptDir, 'finished-order'), 'utf8'), 'codex\nclaude\n');
+  for (const name of ['brief.md', 'brief-secondary-1.md']) {
+    const brief = fs.readFileSync(path.join(result.json.artifacts.attemptDir, name), 'utf8');
+    assert.ok(brief.includes(PLAN_BODY.trimEnd()));
+    assert.ok(!brief.includes(PLAN_REVISED.trimEnd()));
+  }
+  fs.writeFileSync(path.join(common.runDir(HOME, runId), round.planPath), PLAN_REVISED);
+  const retry = cli('plan', ['review', '--run', runId, '--retry'], { env: { DELEGATE_SKILLS_DIR: relayRoot } }).json;
+  assert.match(retry.error, /stored plan snapshot changed/);
+  assert.deepEqual(fs.readdirSync(retry.artifacts.attemptDir), [], 'neither reviewer launched');
+});
+
+test('bundled read-only relays distinguish in-worktree review artifacts from source edits', () => {
+  const repo = makeRepo(), bin = path.join(SCRATCH, 'tripwire-cli'), xdg = path.join(bin, 'config');
+  fs.mkdirSync(path.join(xdg, 'delegate-skills'), { recursive: true });
+  fs.writeFileSync(path.join(xdg, 'delegate-skills', 'config.json'), JSON.stringify({ version: 'delegate-fleet.v1', lanes: {
+    'plan-main': { implementer: 'claude', model: 'primary' }, 'plan-debate': { implementer: 'qoder', model: 'secondary' },
+  } }));
+  const script = `#!/usr/bin/env node
+import fs from 'node:fs'; import path from 'node:path';
+if (process.argv.includes('--version')) { console.log('2.1.0'); process.exit(0); }
+if (process.argv.includes('--help')) { console.log('--read-only'); process.exit(0); }
+const runs = path.join(process.env.DEBATE_HOME, 'runs'), id = fs.readdirSync(runs)[0];
+const attempt = path.join(runs, id, 'round-1', 'attempt-1'), ready = path.join(process.env.XDG_CONFIG_HOME, id);
+const finalMessage = ${JSON.stringify(JSON.stringify(readFix('plan-review-round1.json')))};
+function waitFor(file) {
+  const end = Date.now() + 10000;
+  while (!fs.existsSync(file) && Date.now() < end) Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 20);
+  if (!fs.existsSync(file)) process.exit(2);
+}
+if (process.argv.includes('--out-dir')) {
+  waitFor(ready);
+  const out = process.argv[process.argv.indexOf('--out-dir') + 1], eventsPath = path.join(out, 'custom-events');
+  fs.writeFileSync(eventsPath, 'third-party event');
+  fs.writeFileSync(path.join(out, 'result.json'), JSON.stringify({ status: 'completed', finalMessage, eventsPath, readOnlyViolation: false }));
+  fs.writeFileSync(ready + '.done', '');
+} else {
+  fs.writeFileSync(ready, '');
+  waitFor(ready + '.done');
+  if (process.env.EDIT) fs.writeFileSync(path.resolve(attempt, process.env.EDIT), 'unexpected');
+  console.log(JSON.stringify({ type: 'result', subtype: 'success', result: finalMessage }));
+}
+`;
+  fs.writeFileSync(path.join(bin, 'claude'), script, { mode: 0o755 });
+  const custom = path.join(bin, 'qoder-delegate', 'scripts');
+  fs.mkdirSync(custom, { recursive: true });
+  fs.writeFileSync(path.join(custom, 'relay.mjs'), script);
+  for (const [name, edit] of [['visible', ''], ['source', path.join(repo, 'app.py')], ['sibling', 'relay-secondary-1/unexpected.txt']]) {
+    const home = path.join(repo, name);
+    const options = { input: PLAN_BODY, env: { DEBATE_HOME: home, DELEGATE_SKILLS_DIR: bin, XDG_CONFIG_HOME: xdg, PATH: bin + path.delimiter + process.env.PATH, EDIT: edit } };
+    const started = cli('plan', ['review', '--new', '--plan', '-', '--seat', 'claude', '--session', name, '--cwd', repo, '--detach'], options);
+    assert.equal(started.json?.status, 'running', started.stdout + started.stderr);
+    const result = cli('plan', ['wait', '--run', started.json.runId, '--max-wait', '15s'], options);
+    assert.equal(result.json?.status, edit ? 'failed' : 'completed', result.stdout + result.stderr);
+    if (edit) assert.equal(result.json.failureDetails.failureClass, 'read_only_violation');
+    const { attemptDir } = result.json.artifacts;
+    for (const dir of ['relay', 'relay-secondary-1']) {
+      const artifact = common.readJson(path.join(attemptDir, dir, 'result.json'));
+      assert.equal(path.dirname(artifact.eventsPath), path.join(attemptDir, dir));
+      assert.ok(fs.existsSync(artifact.eventsPath));
+    }
   }
 });
 
@@ -674,6 +792,64 @@ test('a failed secondary plan reviewer fails the paired attempt and remains retr
   assert.equal(failed.rounds[0].attempts[0].agents.length, 2);
   assert.equal(failed.rounds[0].attempts[0].failureDetails.stage, 'secondary-1');
   assert.equal(plan.reviewDoc(failed).retryAvailable, true);
+});
+
+test('two failed relays retain both diagnoses and honor rate limit and read-only recovery rules', () => {
+  const runId = newPlanRun();
+  plan.startRound(HOME, runId, PLAN_BODY);
+  plan.startAttempt(HOME, runId, [REVIEWER, SECOND_REVIEWER]);
+  const { relayDir } = attemptRelayDir(runId);
+  writeRelayResult(relayDir, { readOnlyViolation: true });
+  writeRelayResult(relayDir + '-secondary-1', { status: 'failed', extra: { error: 'Rate limit reached' } });
+  const run = plan.ingestPlanReview(HOME, runId, 1, 1, [{ relayDir }, { relayDir: relayDir + '-secondary-1' }]);
+  const doc = plan.reviewDoc(run);
+  assert.deepEqual(doc.reviewerFailures.map(f => [f.stage, f.failureClass]), [['primary', 'read_only_violation'], ['secondary-1', 'rate_limited']]);
+  assert.equal(doc.retryAvailable, false);
+  assert.equal(doc.needsUserDecision, true);
+  assert.throws(() => recovery.validateResume(run, { seat: SEAT, session: SESSION, reason: 'user authorized: retry' }, HOME), /remediate/);
+});
+
+for (const [label, report, diagnosis] of [
+  ['invalid JSON review', { doc: { summary: 'Add tests for the quota reset.' } }, 'bad_output'],
+  ['non-JSON review', { extra: { finalMessage: 'Test the quota reset.' } }, 'bad_output'],
+  ['watchdog timeout', { status: 'timeout', extra: { finalMessage: 'Test the quota reset.' } }, 'timeout'],
+  ['changed report', { doc: readFix('plan-review-round1.json') }, 'read_only_violation'],
+]) {
+  test(`${label} cannot spend the retry for a failed peer`, () => {
+    const runId = newPlanRun();
+    plan.startRound(HOME, runId, PLAN_BODY);
+    plan.startAttempt(HOME, runId, [REVIEWER, SECOND_REVIEWER]);
+    const { relayDir } = attemptRelayDir(runId);
+    writeRelayResult(relayDir, { status: 'failed', extra: { error: 'Service unavailable' } });
+    const other = { relayDir: writeRelayResult(relayDir + '-secondary-1', report), exitCode: report.status === 'timeout' ? 1 : 0 };
+    if (label === 'changed report') {
+      other.resultAtExit = fs.readFileSync(path.join(other.relayDir, 'result.json'), 'utf8');
+      writeRelayResult(other.relayDir, { doc: { ...report.doc, summary: 'Replacement' } });
+    }
+    const view = plan.reviewDoc(plan.ingestPlanReview(HOME, runId, 1, 1, [{ relayDir }, other]));
+    assert.equal(view.retryAvailable, true);
+    assert.deepEqual(view.reviewerFailures.map(f => f.failureClass), ['service_error', diagnosis]);
+    if (label === 'changed report') {
+      assert.equal(view.failureDetails.stage, 'secondary-1');
+      assert.match(view.warnings.join(' '), /remediate/i);
+      assert.equal(fs.readFileSync(path.join(other.relayDir, 'result-at-exit.json'), 'utf8'), other.resultAtExit);
+    } else assert.match(view.reviewerFailures[1].finalMessage, /quota reset/);
+  });
+}
+
+test('broken relay artifacts preserve the reported violation and both reviewer durations', () => {
+  const runId = newPlanRun();
+  plan.startRound(HOME, runId, PLAN_BODY);
+  plan.startAttempt(HOME, runId, [REVIEWER, SECOND_REVIEWER]);
+  const { relayDir } = attemptRelayDir(runId);
+  writeRelayResult(relayDir, { readOnlyViolation: true, extra: { eventsPath: relayDir } });
+  const secondary = writeRelayResult(relayDir + '-secondary-1', {});
+  fs.writeFileSync(path.join(secondary, 'result.json'), '{');
+  const run = plan.ingestPlanReview(HOME, runId, 1, 1, [{ relayDir }, { relayDir: secondary, seconds: 3 }]);
+  const at = run.rounds[0].attempts[0];
+  assert.deepEqual(at.agents.map(a => [a.seconds, a.failureDetails.failureClass]), [[240, 'read_only_violation'], [3, 'internal']]);
+  assert.equal(at.coverage, 'violation');
+  assert.equal(at.seconds, 243);
 });
 
 test('fence-aware markers: examples inside backtick/tilde fences are ignored, duplicates and malformed blocks rejected, content after the block preserved', () => {

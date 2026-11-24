@@ -8,7 +8,7 @@ import os from 'node:os';
 import path from 'node:path';
 import crypto from 'node:crypto';
 import { fileURLToPath } from 'node:url';
-import { spawn, spawnSync } from 'node:child_process';
+import { execFile, spawn, spawnSync } from 'node:child_process';
 import { diffEntries } from './diff.mjs';
 
 export const RUN_SCHEMA = 'debate.run.v1';
@@ -980,15 +980,27 @@ export function relaySupportsReadOnly(relayPath) {
   }
   return readOnlyProbe.get(relayPath);
 }
-/** Run one relay read-only. Returns { status, result, seconds, exitCode } where result is result.json or null. */
-export function runRelay({ implementer, lane, briefPath, cwd, outDir, timeout, extraArgs = [], env }) {
+function relayArgs({ implementer, lane, briefPath, cwd, outDir, timeout, extraArgs = [] }) {
   const relay = findScript(`${implementer}-delegate`, 'relay.mjs');
-  const args = [relay, '--brief', briefPath, '--cd', cwd, '--lane', lane, '--read-only', '--out-dir', outDir, '--timeout', timeout, ...(implementer === 'codex' ? ['--ignore-user-config', '--no-project-doc'] : []), ...extraArgs];
+  return [relay, '--brief', briefPath, '--cd', cwd, '--lane', lane, '--read-only', '--out-dir', outDir, '--timeout', timeout, ...(implementer === 'codex' ? ['--ignore-user-config', '--no-project-doc'] : []), ...extraArgs];
+}
+/** Run one relay read-only. Returns { result, seconds, exitCode } where result is result.json or null. */
+export function runRelay(options) {
   const started = Date.now();
-  const proc = spawnSync(process.execPath, args, { encoding: 'utf8', maxBuffer: 64 * 1024 * 1024, stdio: ['ignore', 'pipe', 'pipe'], env: childEnv(env) });
+  const proc = spawnSync(process.execPath, relayArgs(options), { encoding: 'utf8', maxBuffer: 64 * 1024 * 1024, stdio: ['ignore', 'pipe', 'pipe'], env: childEnv(options.env) });
   const seconds = Math.round((Date.now() - started) / 1000);
-  const result = readJsonIfExists(path.join(outDir, 'result.json'));
+  const result = readJsonIfExists(path.join(options.outDir, 'result.json'));
   return { exitCode: proc.status, signal: proc.signal, stderrTail: String(proc.stderr || '').split('\n').slice(-20).join('\n'), result, seconds };
+}
+export function runRelayAsync(options) {
+  const started = Date.now();
+  return new Promise(resolve => {
+    const child = execFile(process.execPath, relayArgs(options), { maxBuffer: 64 * 1024 * 1024, env: childEnv(options.env) }, (error, stdout, stderr) => {
+      resolve({ exitCode: error ? (Number.isInteger(error.code) ? error.code : 1) : 0,
+        stderrTail: (stderr || '').split('\n').slice(-20).join('\n'), seconds: Math.round((Date.now() - started) / 1000) });
+    });
+    child.stdin.end();
+  });
 }
 export function spawnDetached(script, args, logPath, env) {
   fs.mkdirSync(path.dirname(logPath), { recursive: true, mode: 0o700 });

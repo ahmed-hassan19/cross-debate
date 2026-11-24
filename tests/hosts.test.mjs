@@ -187,7 +187,7 @@ test('setup lanes proposes only missing lanes, pairs seats with another CLI, and
   assert.equal(fs.existsSync(path.join(xdg, 'delegate-skills', 'config.json')), false);
   const ok = run(['setup', 'lanes'], { env: { XDG_CONFIG_HOME: xdg, PATH: binWith(['claude', 'codex']) } });
   assert.equal(ok.status, 0, ok.stdout + ok.stderr);
-  assert.match(ok.stdout, /seat claude: plan reviewers codex then claude \(secondary is the seat's own CLI/);
+  assert.match(ok.stdout, /seat claude: plan reviewers codex and claude \(secondary is the seat's own CLI/);
   assert.match(ok.stdout, /dry run/);
   assert.equal(fs.existsSync(path.join(xdg, 'delegate-skills', 'config.json')), false);
 });
@@ -484,9 +484,9 @@ test('push forms the shell rewrites stay gated: continuations, expanding heredoc
 test('setup flags a plan pairing whose secondary repeats the primary reviewer', () => {
   const ok = run(['setup', 'lanes'], { env: { XDG_CONFIG_HOME: path.join(SCRATCH, 'pairing-xdg'), PATH: binWith(['claude', 'codex']) } });
   assert.equal(ok.status, 0, ok.stdout + ok.stderr);
-  assert.match(ok.stdout, /seat codex: plan reviewers codex then claude\n/, 'the default proposal gives every seat two models');
+  assert.match(ok.stdout, /seat codex: plan reviewers codex and claude\n/, 'the default proposal gives every seat two models');
   assert.match(setup.seatPairs({ 'plan-main': { implementer: 'claude' }, 'plan-debate': { implementer: 'claude' } }, ['codex'])[0],
-    /seat codex: plan reviewers claude then claude \(secondary repeats the primary reviewer/);
+    /seat codex: plan reviewers claude and claude \(secondary repeats the primary reviewer/);
 });
 
 test('a debate reviewer that supplies new_findings as anything but an array is rejected, not read as clean', async () => {
@@ -501,7 +501,7 @@ test('a debate reviewer that supplies new_findings as anything but an array is r
 
 test('plan pairing compares models, so two lanes on one CLI with different models are not flagged', () => {
   const lanes = { 'plan-main-codex': { implementer: 'claude', model: 'model-a' }, 'plan-debate': { implementer: 'claude', model: 'model-b' } };
-  assert.equal(setup.seatPairs(lanes, ['codex'])[0], 'seat codex: plan reviewers claude then claude');
+  assert.equal(setup.seatPairs(lanes, ['codex'])[0], 'seat codex: plan reviewers claude and claude');
   assert.match(setup.seatPairs({ ...lanes, 'plan-debate': { implementer: 'claude', model: 'model-a' } }, ['codex'])[0], /repeats the primary reviewer/);
 });
 
@@ -546,7 +546,7 @@ test('setup init: Enter on every prompt writes exactly the proposed lanes, and n
   assert.equal(accepted.text.includes('discovering models'), false, 'accepting the defaults skips model discovery');
   assert.match(accepted.text, /\+ review-debate: codex default model/, 'the write preview names each lane');
   assert.match(accepted.text, /\[sandbox_workspace_write\]\nwritable_roots/, 'init shows the Codex config.toml lines when it offers Codex hooks');
-  assert.match(accepted.text, /seat claude: plan reviewers codex then claude/);
+  assert.match(accepted.text, /seat claude: plan reviewers codex and claude/);
   const declined = await init(['claude', 'codex'], scripted([[/Write this change/, ['n']]]));
   assert.equal(declined.lanes, null);
   assert.match(declined.text, /not written/);
