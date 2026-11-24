@@ -2,6 +2,8 @@ name: test
 
 on:
   push:
+    branches: [main]
+    tags: ['v*']
   pull_request:
 
 permissions:
@@ -20,18 +22,14 @@ jobs:
       - uses: actions/setup-node@v7
         with:
           node-version: ${{ matrix.node }}
-      - run: node --test tests/vendor-relays.test.mjs tests/hosts.test.mjs tests/workflow.test.mjs tests/briefs.test.mjs tests/readiness.test.mjs tests/history-report.test.mjs tests/history-report-cli.test.mjs
-  installer:
-    strategy:
-      matrix:
-        os: [ubuntu-latest, macos-latest]
-    runs-on: ${{ matrix.os }}
-    steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-node@v7
-        with:
-          node-version: 22
-          cache: npm
-      - run: npm ci --ignore-scripts
-      - run: npm run test:installer
-      - run: node --test tests/package.test.mjs
+          cache: ${{ matrix.node == 22 && 'npm' || '' }}
+      - name: Test the dependency-free runtime
+        if: matrix.node == 18
+        shell: bash
+        run: |
+          shopt -s extglob
+          node --test tests/!(installer|package).test.mjs
+      - if: matrix.node == 22
+        run: npm ci --ignore-scripts
+      - if: matrix.node == 22
+        run: npm test
