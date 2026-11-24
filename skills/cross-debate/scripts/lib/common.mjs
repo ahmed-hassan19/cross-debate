@@ -1356,8 +1356,13 @@ export function validateVerdictDoc(doc, { findingIds, contestedIds = [], assumpt
     if (a.changed_plan !== undefined && typeof a.changed_plan !== 'boolean') errors.push(`${where} changed_plan must be a boolean`);
   });
   const missed = Array.isArray(doc.missed) ? doc.missed : (errors.push('missed must be an array'), []);
-  missed.forEach((m, i) => { if (!m || !isNonEmptyString(m.claim)) errors.push(`missed[${i}] needs a claim`); });
+  missed.forEach((m, i) => {
+    if (!m || !isNonEmptyString(m.claim)) errors.push(`missed[${i}] needs a claim`);
+    if (code && m?.fixed !== undefined && typeof m.fixed !== 'boolean') errors.push(`missed[${i}] fixed must be a boolean`);
+    if (code && m?.change !== undefined && typeof m.change !== 'string') errors.push(`missed[${i}] change must be a string`);
+  });
   if (code) {
+    if (doc.editorial_reason !== undefined && !isNonEmptyString(doc.editorial_reason)) errors.push('editorial_reason must be a non-empty string');
     const checks = doc.checks === undefined ? [] : doc.checks;
     if (!Array.isArray(checks)) errors.push('checks must be an array');
     else checks.forEach((c, i) => { if (!c || !isNonEmptyString(c.command) || !isNonEmptyString(c.result)) errors.push(`checks[${i}] needs command and result`); });
