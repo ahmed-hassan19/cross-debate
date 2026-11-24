@@ -8,10 +8,11 @@ import path from 'node:path';
 import {
   SESSION_RE, SHELLS, SKILL_DIR, usage, nowIso, log, newEventId, debateHome, ensureHome, automationOff, readStdin, cliCommand,
   loadRun, loadSession, updateSession, loadLedger, updateLedger, auditEvent, sessionKey, ownsCandidate, repoIdentity, headSha, emptyTreeSha, branchOf,
-  startFingerprint, porcelainStatus, splitPlan, planPathFromTranscript, extractProposedPlan, gitGateDecision, isPidAlive,
-  repositoryScope, worktreeRoots, treeOf, git, appendAuditRow,
+  startFingerprint, porcelainStatus, hasHiddenIndexBits, splitPlan, planPathFromTranscript, extractProposedPlan, gitGateDecision, isPidAlive,
+  repositoryScope, worktreeRoots, gitCommonDir, treeOf, remoteContains, git, appendAuditRow,
 } from './lib/common.mjs';
 import { checkReceipt } from './plan.mjs';
+import { gitlinkEntries } from './lib/local.mjs';
 import { needsUserDecision } from './lib/recovery.mjs';
 
 const PLAN_GUIDE = path.join(SKILL_DIR, 'references', 'plan.md');
@@ -170,19 +171,73 @@ function planStopGate({ seat, sessionId, input, home, now }) {
   if (!check.ok) return once(check.reason);
   return { output: null, note: check.warning ? `receipt ok with warning: ${check.warning}` : 'receipt ok' };
 }
-/** Terminal receipts from the ledgers of every worktree of the repository; a reviewed commit may have been promoted from a linked worktree. Never throws. */
-function repositoryReceipts(home, root, gitOpts) {
-  let roots;
-  try { roots = worktreeRoots(root, gitOpts); } catch { roots = [root]; }
-  const receipts = [];
+function repositoryWorktrees(root, gitOpts, strict = false) {
+  let roots, commonDir;
+  try {
+    commonDir = gitCommonDir(root, gitOpts);
+    roots = worktreeRoots(root, gitOpts);
+  } catch (error) {
+    if (strict) throw error;
+    roots = [root];
+  }
+  const worktrees = [];
   for (const wt of roots) {
     try {
+      if (wt !== root && gitCommonDir(wt, gitOpts) !== commonDir) continue;
       const identity = repoIdentity(wt, gitOpts);
-      const ledger = identity && loadLedger(home, identity.repoKey);
+      if (!identity || identity.worktreeRoot !== fs.realpathSync(wt)) throw new Error('unreadable worktree');
+      worktrees.push(identity);
+    } catch (error) { if (strict) throw error; }
+  }
+  return worktrees;
+}
+function repositoryReceipts(home, worktrees) {
+  const receipts = [];
+  for (const { repoKey } of worktrees) {
+    try {
+      const ledger = loadLedger(home, repoKey);
       if (ledger) receipts.push(...ledger.receipts.filter(r => TERMINAL.has(r.outcome)));
-    } catch { /* an unreadable worktree or ledger contributes no receipts */ }
+    } catch { /* an unreadable ledger contributes no receipts */ }
   }
   return receipts;
+}
+function isReceipted(receipts, sha, tree) {
+  return receipts.some(r => r.commitSha === sha || (tree && r.treeId === tree));
+}
+function headHasReceipt(receipts, root, head, gitOpts) {
+  let tree;
+  try { tree = treeOf(root, head, gitOpts); } catch { /* a commit receipt still matches */ }
+  return isReceipted(receipts, head, tree);
+}
+function cleanCheckout(root, gitOpts) {
+  // Parent status checks the gitlink commit; each initialized child reports its own files once.
+  if (porcelainStatus(root, { ...gitOpts, strict: true }).length || hasHiddenIndexBits(root, gitOpts)) return false;
+  for (const rel of gitlinkEntries(root, { ...gitOpts, encoding: null }).keys()) {
+    const child = path.join(root, rel);
+    if (fs.lstatSync(path.join(child, '.git'), { throwIfNoEntry: false })) {
+      if (!cleanCheckout(child, gitOpts)) return false;
+    } else if (fs.readdirSync(child).length) return false;
+  }
+  return true;
+}
+function trustedCheckout(home, cwd, identity, head, key, gitOpts) {
+  const root = identity.worktreeRoot;
+  try {
+    if (!cleanCheckout(root, gitOpts)) return null;
+    let note;
+    try {
+      if (remoteContains(root, head, gitOpts).length) note = 'clean HEAD is on a remote-tracking ref';
+    } catch { /* without publication evidence, check the receipts */ }
+    const worktrees = repositoryWorktrees(root, gitOpts, true);
+    if (!note && headHasReceipt(repositoryReceipts(home, worktrees), root, head, gitOpts)) note = 'clean HEAD has a passed/waived receipt';
+    if (note && (!cleanCheckout(root, gitOpts) || headSha(root, gitOpts) !== head || repoIdentity(cwd, gitOpts)?.repoKey !== identity.repoKey)) return null;
+    for (const wt of worktrees) {
+      const active = loadLedger(home, wt.repoKey)?.active;
+      if (ownsCandidate(active, key)) return existingCandidate(home, active, key, headSha(wt.worktreeRoot, gitOpts), wt.worktreeRoot);
+    }
+    return note ? { output: null, note } : null;
+  } catch { /* incomplete evidence grants no automatic exception */ }
+  return null;
 }
 
 /** Give the Stop hook lifecycle-aware guidance for the active code candidate. */
@@ -245,6 +300,11 @@ function activeCodeRunHint(home, active, sessionKeyValue, head, includePending =
   };
   return null;
 }
+function existingCandidate(home, active, key, head, root) {
+  const hint = activeCodeRunHint(home, active, key, head, true);
+  const reason = hint?.reason || `this session owns active candidate ${active.runId}; continue review --run ${active.runId} per ${CODE_GUIDE}.`;
+  return { output: block(`debate-code: ${reason} Worktree: ${root}.`), note: hint?.note || 'blocked: active candidate' };
+}
 /** Commits reachable from head but not from base nor any remote-tracking ref, each with parents and tree. Null when Git cannot answer. */
 function unpublishedCommits(root, base, head, gitOpts) {
   try {
@@ -290,38 +350,28 @@ function codeStopGate({ seat, sessionId, cwd, input, home, gitOpts }) {
   }
   if (input.stopHookActive) return { output: null, note: 'stop_hook_active: already blocked this turn' };
   const head = headSha(root, gitOpts);
-  if (!head) return { output: null, note: 'unborn HEAD' };
   const active = ledger?.active;
   const owns = ownsCandidate(active, key);
   const activeHint = activeCodeRunHint(home, active, key, head);
   if (activeHint) return { output: block(`debate-code: ${activeHint.reason}`), note: activeHint.note };
-  const existingCandidate = () => {
-    const hint = activeCodeRunHint(home, active, key, head, true);
-    return { output: block(`debate-code: ${hint?.reason || `this session owns active candidate ${active.runId}; inspect its recorded state and continue review --run ${active.runId} per ${CODE_GUIDE}.`}`), note: hint?.note || 'blocked: active candidate' };
-  };
+  if (!head) return { output: null, note: 'unborn HEAD' };
   const observerHint = `Edit authorship is unknown.${active ? ` The foreign owner is ${active.seat} session ${active.sessionId}, run ${active.runId}.` : ''} If this session has no outstanding implementation changes of its own, declare it: ${code(`observe --seat ${seat} --session ${sessionId} --cwd ${JSON.stringify(root)}`)} --reason "<basis from this session's actions>". Otherwise use a legitimate unfinished checkpoint or a separate worktree.`;
   const baseline = ledger && ledger.baselines[key];
   const deferHint = `If this turn is an unfinished checkpoint or a question, run: ${code(`defer --seat ${seat} --session ${sessionId} --cwd ${JSON.stringify(root)}`)} --reason "<why unfinished>"`;
+  if (head === baseline?.headSha && startFingerprint(root, gitOpts) === baseline.startFingerprint) return { output: null, note: 'nothing changed since the session baseline' };
+  if (owns) return existingCandidate(home, active, key, head, root);
   if (!baseline) {
-    if (owns) return existingCandidate();
+    const trusted = trustedCheckout(home, cwd, identity, head, key, gitOpts);
+    if (trusted) return trusted;
     if (active) return { output: block(`debate-code: no session baseline is registered for ${root}. ${observerHint} ${deferHint}`), note: 'blocked: no baseline' };
     return { output: block(`debate-code: no session baseline is registered for ${root}. Register the before-change commit explicitly: ${code(`baseline --seat ${seat} --session ${sessionId} --cwd ${JSON.stringify(root)}`)} --base <before-change-sha> --reason "<basis>" (current HEAD ${head.slice(0, 12)} is acceptable only if nothing changed in this session). Then follow ${CODE_GUIDE} (begin/adopt → commit → review → verdict → finish). ${observerHint} ${deferHint}`), note: 'blocked: no baseline' };
   }
-  const fingerprint = startFingerprint(root, gitOpts);
-  if (head === baseline.headSha && fingerprint === baseline.startFingerprint) return { output: null, note: 'nothing changed since the session baseline' };
-  if (owns) return existingCandidate();
-  let dirty = [];
+  let dirty;
   try { dirty = porcelainStatus(root, gitOpts); } catch { dirty = [{ code: '??', path: '<status unavailable>' }]; }
   const clean = dirty.length === 0;
-  // no diff against the baseline commit remains (e.g. pre-existing untracked files were since excluded): nothing to review
   if (clean && head === baseline.headSha) return { output: null, note: 'clean worktree at the session baseline HEAD' };
-  // receipts are matched by commit or by tree across every worktree of the repository: a squash-merge or
-  // fast-forward of a candidate reviewed in a linked worktree carries the same tree under a new commit
-  const receipts = repositoryReceipts(home, root, gitOpts);
-  const isReceipted = (sha, tree) => receipts.some(r => r.commitSha === sha || (tree && r.treeId === tree));
-  let headTree = null;
-  try { headTree = treeOf(root, head, gitOpts); } catch { headTree = null; }
-  const receipted = isReceipted(head, headTree);
+  const receipts = repositoryReceipts(home, repositoryWorktrees(root, gitOpts));
+  const receipted = headHasReceipt(receipts, root, head, gitOpts);
   if (clean && receipted) return { output: null, note: 'clean HEAD has a passed/waived receipt' };
   if (receipted) {
     // the commit is already certified; only the worktree differs, so a full re-review of the same tree is the wrong reflex
@@ -333,7 +383,7 @@ function codeStopGate({ seat, sessionId, cwd, input, home, gitOpts }) {
     // promotion: a pull, merge, or checkout brought in only published commits, receipted commits, or merge commits.
     // Merge commits are trusted structurally; conflict edits inside one are not reviewed here.
     const since = unpublishedCommits(root, baseline.headSha, head, gitOpts);
-    if (since && since.every(c => c.parents.length >= 2 || isReceipted(c.sha, c.tree))) return { output: null, note: 'HEAD moved by published, receipted, or merge commits only' };
+    if (since && since.every(c => c.parents.length >= 2 || isReceipted(receipts, c.sha, c.tree))) return { output: null, note: 'HEAD moved by published, receipted, or merge commits only' };
   }
   const promotionHint = moved ? ` If HEAD moved because reviewed work was merged, pulled, or rebased (a promotion, not new work), register it: ${code(`baseline --seat ${seat} --session ${sessionId} --cwd ${JSON.stringify(root)}`)} --base ${head} --reason "promotion: <what was merged and where it was reviewed>"; never create a no-op candidate to re-review promoted work.` : '';
   const untrackedOnly = !clean && dirty.every(e => e.code === '??');

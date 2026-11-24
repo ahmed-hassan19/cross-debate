@@ -123,10 +123,10 @@ function assertWorkTree(repoDir) {
   if (head.status !== 0) throw new Error(`no commits in ${repoDir}`);
 }
 
-function gitlinkEntries(repoDir) {
-  const raw = run('git', ['-C', repoDir, 'ls-files', '-s', '-z']).stdout;
+export function gitlinkEntries(repoDir, opts) {
+  const raw = run('git', ['-C', repoDir, 'ls-files', '-s', '-z'], opts).stdout;
   const map = new Map();
-  for (const line of nulSplit(raw)) {
+  for (const line of Buffer.isBuffer(raw) ? gitPathSplit(raw) : nulSplit(raw)) {
     if (line.startsWith('160000 ')) {
       const tab = line.indexOf('\t');
       if (tab !== -1) map.set(line.slice(tab + 1), line.slice(7, tab).split(' ')[0]);

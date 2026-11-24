@@ -282,9 +282,12 @@ export function repositoryScope(cwd, { home = debateHome(), ...gitOpts } = {}) {
   }
   return { identity, configured, enabled, effective, gitGate, warnings };
 }
+export function gitCommonDir(cwd, opts) {
+  return fs.realpathSync(gitText(cwd, ['rev-parse', '--path-format=absolute', '--git-common-dir'], opts));
+}
 export function withRepositoryScopeLock(cwd, fn, home = debateHome()) {
   if (!repoIdentity(cwd)) throw usage(`${cwd} is not inside a Git work tree`);
-  const commonDir = fs.realpathSync(gitText(cwd, ['rev-parse', '--path-format=absolute', '--git-common-dir']));
+  const commonDir = gitCommonDir(cwd);
   return withLock(path.join(home, 'scope-locks', `${sha256(commonDir)}.lock`), fn);
 }
 export function scopeWarning(cwd, home = debateHome()) {
@@ -377,8 +380,9 @@ export function startFingerprint(root, { strict = false, ...opts } = {}) {
 }
 const STRICT_UTF8 = new TextDecoder('utf-8', { fatal: true });
 /** Porcelain v1 entries; throws on non-UTF-8 paths. */
-export function porcelainStatus(root, { ignoreSubmodules = 'dirty', ...opts } = {}) {
+export function porcelainStatus(root, { ignoreSubmodules = 'dirty', strict = false, ...opts } = {}) {
   const r = git(root, ['status', '--porcelain=v1', '-z', '--untracked-files=all', `--ignore-submodules=${ignoreSubmodules}`], { ...opts, encoding: 'buffer' });
+  if (strict && r.stderr.length) throw new Error('Git reported an incomplete status');
   let text;
   try { text = STRICT_UTF8.decode(r.stdout); } catch { throw new Error('unsupported path encoding: non-UTF-8 paths in git status'); }
   const tokens = text.split('\0');
