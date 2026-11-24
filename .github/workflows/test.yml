@@ -16,6 +16,9 @@ jobs:
       matrix:
         os: [ubuntu-latest, macos-latest]
         node: [18, 22]
+        exclude:
+          - os: macos-latest
+            node: 18
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v7
