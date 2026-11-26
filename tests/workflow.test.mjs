@@ -2475,7 +2475,7 @@ test('agreed stop, code: a non-blocking finding fixed by amendment with no_furth
     { id: 'R1:F2', verdict: 'discard', reason: 'not required', evidence: 'CLAUDE.md:1' },
     { id: 'R1:D1', verdict: 'discard', reason: 'callers validate', evidence: 'app.py:2' },
   ], contest_rulings: [], assumptions: [], missed: [], checks: [{ command: 'pytest', result: 'passed' }], no_further_review: true, ...over });
-  const cycle = (label, mutate, over) => {
+  const cycle = (label, mutate, over, mixed = false) => {
     const b = cli('code', ['begin', '--seat', 'claude', '--session', sid, '--cwd', repo]).json;
     assert.equal(b.ok, true, JSON.stringify(b));
     fs.appendFileSync(path.join(repo, 'app.py'), `# ${label}\n`);
@@ -2483,6 +2483,7 @@ test('agreed stop, code: a non-blocking finding fixed by amendment with no_furth
     startCodeRoundAndAttempt(b.runId);
     ingestFixture(b.runId, 'backend-findings.json', { mutate });
     fs.appendFileSync(path.join(repo, 'app.py'), `# fix ${label}\n`);
+    if (mixed) fs.writeFileSync(path.join(repo, 'CHANGELOG.md'), '- Updated averages.\n');
     const amended = amendAll(repo);
     const file = path.join(common.runDir(HOME, b.runId), 'v.json');
     fs.writeFileSync(file, JSON.stringify(verdictDoc(over)));
@@ -2523,11 +2524,258 @@ test('agreed stop, code: a non-blocking finding fixed by amendment with no_furth
   assert.equal(blocker.v.next, 'continue');
   assert.equal(blocker.v.agreed, false);
   cli('code', ['waive', '--run', blocker.runId, '--reason', 'user approved: waive the negative case']);
+  const mixed = cycle('mixed', softenF1, {}, true);
+  assert.equal(mixed.v.next, 'continue');
+  cli('code', ['waive', '--run', mixed.runId, '--reason', 'user approved: close the mixed fixture']);
   const unfixed = cycle('unfixed', softenF1, { verdicts: verdictDoc().verdicts.map(v => v.id === 'R1:D1' ? { ...v, verdict: 'confirm', fixed: false } : v) });
   assert.deepEqual(unfixed.v.unfixedBlockers, ['R1:D1']);
   assert.equal(unfixed.v.next, 'continue');
   assert.equal(unfixed.v.agreed, false);
   cli('code', ['waive', '--run', unfixed.runId, '--reason', 'user approved: waive the negative case']);
+});
+
+test('editorial follow-up compares reviewed and amended trees and records the reason and receipt', () => {
+  const note = '- An empty list now averages to zero.\n';
+  const repo = makeRepo();
+  const begin = cli('code', ['begin', '--seat', 'codex', '--session', 'editorial', '--cwd', repo]).json;
+  const runId = begin.runId;
+  fs.writeFileSync(path.join(repo, 'app.py'), 'def avg(items):\n    return sum(items) / len(items) if items else 0\n');
+  commitAll(repo, 'Handle empty lists');
+  startCodeRoundAndAttempt(runId);
+  ingestFixture(runId, 'backend-findings.json');
+  fs.writeFileSync(path.join(repo, 'CHANGELOG.md'), note);
+  const amended = amendAll(repo);
+  const doc = { review_rating: 8, no_further_review: true, verdicts: [
+    { id: 'R1:F1', verdict: 'discard', reason: 'The reviewed conditional already checks for an empty list.', evidence: 'app.py:2' },
+    { id: 'R1:F2', verdict: 'discard', reason: 'A docstring is optional.' },
+    { id: 'R1:D1', verdict: 'discard', reason: 'The average accepts negative numbers.', evidence: 'app.py:2' },
+  ], contest_rulings: [], assumptions: [], missed: [] };
+  const verdict = path.join(common.runDir(HOME, runId), 'verdict.json');
+  for (const missed of [{ claim: 'new issue', fixed: 'true' }, { claim: 'new issue', change: true }]) {
+    fs.writeFileSync(verdict, JSON.stringify({ ...doc, missed: [missed] }));
+    const rejected = cli('code', ['verdict', '--run', runId, '--round', '1', '--verdicts', verdict]);
+    assert.equal(rejected.status, 2);
+    assert.match(rejected.json.error.details.join(), /missed\[0\] (?:fixed must be a boolean|change must be a string)/);
+  }
+  fs.writeFileSync(verdict, JSON.stringify(doc));
+  assert.equal(cli('code', ['verdict', '--run', runId, '--round', '1', '--verdicts', verdict]).json.stopReason, 'agreed');
+  const round = common.loadRun(HOME, runId).rounds[0];
+  assert.match(round.agreementReason, /Changelog entry in CHANGELOG.md.*R1:F1/);
+  assert.equal(round.headAfter.tree, gitc(repo, 'rev-parse', 'HEAD^{tree}'));
+  assert.equal(code.computeOutcome(common.loadRun(HOME, runId), round.candidateTree), 'changed_after_review');
+  fs.appendFileSync(path.join(repo, 'CHANGELOG.md'), 'The summary also shows the range.\n');
+  amendAll(repo);
+  assert.equal(code.computeOutcome(common.loadRun(HOME, runId), gitc(repo, 'rev-parse', 'HEAD^{tree}')), 'changed_after_review');
+  gitc(repo, 'reset', '--hard', amended);
+  const finished = cli('code', ['finish', '--run', runId]).json;
+  assert.equal(finished.outcome, 'passed');
+  assert.equal(finished.unreviewedAmendment, true);
+  const receipt = common.loadLedger(HOME, common.repoIdentity(repo).repoKey).receipts.at(-1);
+  assert.deepEqual([receipt.commitSha, receipt.treeId, receipt.unreviewedAmendment], [amended, round.headAfter.tree, true]);
+});
+
+test('editorial follow-up needs an explicit verdict, evidence for discarded blockers and no outstanding or newly fixed blocker', () => {
+  const cases = [
+    ['flag absent', { no_further_review: undefined }],
+    ['no evidence', {}, { evidence: ' ' }],
+    ['confirmed', {}, { verdict: 'confirm', fixed: true }],
+    ['unresolved', {}, { verdict: 'modify', fixed: false }],
+    ['discard claims a fix', {}, { change: 'added guard' }],
+    ['missed fix', { missed: [{ claim: 'missing guard', fixed: true }] }],
+  ];
+  for (const [label, overrides, ruling] of cases) {
+    const repo = makeRepo();
+    const { runId } = cli('code', ['begin', '--seat', 'codex', '--session', 'editorial', '--cwd', repo]).json;
+    fs.appendFileSync(path.join(repo, 'app.py'), '# reviewed\n');
+    commitAll(repo, 'Candidate');
+    startCodeRoundAndAttempt(runId);
+    const review = ingestFixture(runId, 'backend-findings.json').rounds[0].review;
+    fs.writeFileSync(path.join(repo, 'CHANGELOG.md'), '- Fixed averages for empty lists.\n');
+    amendAll(repo);
+    const verdicts = review.findings.map(f => ({ id: f.id, verdict: 'discard', reason: 'Callers handle empty lists.', evidence: 'app.py:1', ...(f.id === 'R1:F1' ? ruling : {}) }));
+    const doc = { review_rating: 8, no_further_review: true,
+      verdicts, contest_rulings: [], assumptions: [], missed: [], ...overrides };
+    assert.equal(code.applyCodeVerdict(HOME, runId, 1, doc).rounds[0].next, 'continue', label);
+  }
+});
+
+test('editorial follow-up preserves a verified advisory fix for a single local README link', () => {
+  const plain = '# Overview\n\nThe tools produce quarterly reports.\n';
+  for (const [target, recommendation, expected, final = {}] of [
+    [plain, 'docs/overview.md', 'stop'],
+    [plain, 'docs/another.md', 'continue'],
+    [plain, 'docs/overview.mdx', 'continue'],
+    [plain, 'docs/overview.md', 'continue', { recommendation: 'Use docs/final.md.' }],
+    [plain, 'docs/overview.md', 'continue', { line_start: 2, line_end: 2 }],
+    [plain, 'docs/another.md', 'stop', { recommendation: 'Replace `docs/ovrview.md` with `docs/overview.md`.' }],
+    ['# Setup\n\npython -m http.server 8080\n', 'docs/overview.md', 'continue'],
+    ['# Sharing\n\nOnly authors see drafts.\n', 'docs/overview.md', 'continue'],
+    ['# Overview\n\nOnly authors\nsee drafts.\n', 'docs/overview.md', 'continue'],
+  ]) {
+    const repo = makeRepo();
+    fs.mkdirSync(path.join(repo, 'docs'));
+    fs.writeFileSync(path.join(repo, 'docs/overview.md'), target);
+    commitAll(repo, 'Add overview');
+    const { runId } = cli('code', ['begin', '--seat', 'codex', '--session', 'editorial', '--cwd', repo]).json;
+    fs.writeFileSync(path.join(repo, 'README.md'), 'Read the [overview](docs/ovrview.md).\n');
+    commitAll(repo, 'Add an overview link');
+    startCodeRoundAndAttempt(runId);
+    ingestFixture(runId, 'backend-findings.json', { mutate: d => {
+      const finding = { ...d.stages.main.doc.findings[1], file: 'README.md', line_start: 1, line_end: 1,
+        claim: 'The overview link is broken.', recommendation: `Use ${recommendation}.` };
+      d.stages.main.doc.findings = [finding];
+      d.stages.debate.doc.new_findings = [];
+      d.stages.final.doc.findings = [{ ...finding, status: 'agreed', ...final }];
+    } });
+    fs.writeFileSync(path.join(repo, 'README.md'), 'Read the [overview](docs/overview.md).\n');
+    amendAll(repo);
+    const doc = { review_rating: 8, no_further_review: true, verdicts: [
+      { id: 'R1:F2', verdict: 'confirm', reason: 'The original target is missing.', fixed: true },
+    ], contest_rulings: [], assumptions: [], missed: [] };
+    assert.equal(code.applyCodeVerdict(HOME, runId, 1, doc).rounds[0].next, expected);
+  }
+});
+
+test('round limit rejects both an unreviewed blocker fix and a later revert to the reviewed broken tree', () => {
+  const repo = makeRepo();
+  const { runId } = cli('code', ['begin', '--seat', 'codex', '--session', 'editorial', '--cwd', repo]).json;
+  fs.appendFileSync(path.join(repo, 'app.py'), '# proposed behavior\n');
+  commitAll(repo, 'Candidate');
+  for (let n = 1; n <= 3; n++) {
+    startCodeRoundAndAttempt(runId);
+    const review = ingestFixture(runId, 'backend-findings.json').rounds.at(-1);
+    fs.appendFileSync(path.join(repo, 'app.py'), `# correction ${n}\n`);
+    amendAll(repo);
+    const verdicts = review.review.findings.map(f => f.id.endsWith(':F1')
+      ? { id: f.id, verdict: 'confirm', reason: 'Guard corrected.', fixed: true }
+      : { id: f.id, verdict: 'discard', reason: 'Handled by the caller.' });
+    const run = code.applyCodeVerdict(HOME, runId, n, { review_rating: 6, verdicts, contest_rulings: [], assumptions: [], missed: [] });
+    if (n < 3) { assert.equal(run.status, 'continue'); continue; }
+    assert.equal(run.stopReason, 'round_limit');
+    assert.equal(code.computeOutcome(run, run.rounds.at(-1).headAfter.tree), 'changed_after_review');
+    gitc(repo, 'reset', '--hard', review.candidateCommit);
+    assert.equal(cli('code', ['finish', '--run', runId]).json.outcome, 'changed_after_review');
+  }
+});
+
+test('editorial follow-up sees amended gitlinks even when Git normally hides submodule changes', () => {
+  const repo = makeRepo(), dependency = makeRepo();
+  gitc(repo, '-c', 'protocol.file.allow=always', 'submodule', 'add', '-q', dependency, 'dependency');
+  fs.writeFileSync(path.join(repo, 'README.md'), 'A sumary appears.\n');
+  commitAll(repo, 'Pin dependency and document summary');
+  gitc(repo, 'config', 'diff.ignoreSubmodules', 'all');
+  const { runId } = cli('code', ['begin', '--seat', 'codex', '--session', 'editorial', '--cwd', repo]).json;
+  fs.appendFileSync(path.join(repo, 'app.py'), '# reviewed\n');
+  const reviewed = commitAll(repo, 'Candidate');
+  startCodeRoundAndAttempt(runId);
+  ingestFixture(runId, 'backend-clean.json');
+  fs.writeFileSync(path.join(repo, 'README.md'), 'A summary appears.\n');
+  const sub = path.join(repo, 'dependency');
+  fs.appendFileSync(path.join(sub, 'app.py'), '# update dependency\n');
+  gitc(sub, 'add', 'app.py');
+  gitc(sub, '-c', 'user.name=Test', '-c', 'user.email=test@example.com', 'commit', '-qm', 'Dependency update');
+  gitc(repo, 'add', 'README.md');
+  gitc(repo, 'update-index', '--cacheinfo', `160000,${gitc(sub, 'rev-parse', 'HEAD')},dependency`);
+  gitc(repo, 'commit', '--amend', '-q', '--no-edit');
+  assert.equal(gitc(repo, 'diff', '--name-only', reviewed, 'HEAD'), 'README.md');
+  assert.equal(gitc(repo, 'diff', '--ignore-submodules=none', '--name-only', reviewed, 'HEAD'), 'README.md\ndependency');
+  const doc = { review_rating: 8, no_further_review: true, editorial_reason: 'The existing summary corrects the spelling.',
+    verdicts: [], contest_rulings: [], assumptions: [], missed: [] };
+  assert.equal(code.applyCodeVerdict(HOME, runId, 1, doc).rounds[0].next, 'continue');
+});
+
+test('editorial follow-up rejects operational and mixed amendments even on an otherwise clean review', () => {
+  const repo = makeRepo();
+  fs.mkdirSync(path.join(repo, 'docs'));
+  const instruction = 'Run make nightly.';
+  const readme = `<picture>\n<img src="icon.png">\n</picture>\n\n# Widget\n\nThe runner lists a sumary.\n\n${instruction}\n`;
+  const cleanup = '# Cleanup\n\nErase the test bucket.\n';
+  const sentence = 'The report shows a total.';
+  const body = `Reports appear each morning.\n\nThe summary follows.\n\n${sentence}\n\nThe footer shows the date.\n`;
+  const contextRationale = 'Displays and shows describe the same total.';
+  const contexts = [
+    ['docs/overview.md', `# Overview\n\n${body}`, 'stop'],
+    ['docs/description.md', `${body}\n<h2>Deletion schedule</h2>\n`, 'stop'],
+    ['docs/timing.md', `<H2\n class="schedule">Deletion schedule</H2>\n\n${body}`, 'continue'],
+    ['docs/series.md', `An introduction.\n2) ${sentence}\n`, 'continue'],
+    ['docs/list.md', `* ${sentence}\n`, 'continue'],
+    ['docs/process.md', `# Deletion procedure\n\n## Overview\n\n${body}`, 'continue'],
+    ['docs/level-two.md', `Deletion schedule\n  --------\n\n${body}`, 'continue'],
+    ['docs/level-one.md', `Deletion\nschedule\n   ====\t\n\nOverview\n ---\n\n${body}`, 'continue'],
+    ['docs/new-section.md', `Deletion schedule\n  ---\n\nOverview\n ===\n\n${body}`, 'stop'],
+    ['docs/separator.md', `## Deletion schedule\n### Overview\n---\n\n${body}`, 'continue'],
+    ['docs/example.md', '# Overview\n\n```text\n\n' + body + '\n```\n', 'continue'],
+    ['docs/backticks.md', '```text\n    ```\n\n' + body + '\n```\n', 'continue'],
+    ['docs/tildes.md', '~~~~text\n   ~~~\n````\n~~~~ more\n    ~~~~\n\n' + body + '\n~~~~\n', 'continue'],
+    ['docs/after-fence.md', ' ~~~text\nExample\n   ~~~~ \t\n\n' + body, 'stop'],
+    ['docs/format.md', `# Overview\n\n<div>\n\n${body}\n</div>\n`, 'continue'],
+  ];
+  for (const [file, data] of [
+    ['README.md', readme],
+    ...contexts,
+    ['docs/targets.md', cleanup],
+    ['docs/storage.md', '# Snapshots\n\nPurge stale snapshots.\n'],
+    ['docs/location.md', 'The county average.\n'],
+    ['docs/drafts.md', '# Sharing\n\nOnly authors see drafts.\n'],
+    ['docs/previews.md', '# Preview\n\nOnly authors see drafts.\n'],
+    ['docs/server.md', 'python -m http.server 8000\n'],
+    ['docs/widgets-cli.md', 'widget fetch summaries\n'],
+    ['docs/containers.md', '1. docker compose start\n'],
+    ['docs/interval.md', '<h2>Deletion schedule</h2>\n\nAfter thirty days.\n'],
+    ['docs/audience.md', 'Drafts are visible to authors.\n'],
+    ['docs/account.md', '## Revoke credentials\n\nAfter thirty days.\n'],
+    ['docs/widgets.md', 'Widgets are availble offline.\n'],
+    ['docs/status.md', '# Overview\n\nThe report shows backup status.\n'],
+    ['docs/agents.md', 'Reply with a sumary.\n'],
+    ['docs/writing.md', 'Editors may update only their posts.\n'],
+    ['docs/catalog.md', '---\n\ntitle: sumary\n\n---\n'],
+  ]) {
+    fs.writeFileSync(path.join(repo, file), data);
+  }
+  commitAll(repo, 'Initial documentation');
+  for (const [file, data, next, extra, rationale] of [
+    ['README.md', readme.replace('sumary', 'summary'), 'stop', null, 'The review result already lists a summary.'],
+    ['README.md', readme.replace('lists a sumary', 'lists a summary for each review'), 'stop', null, 'Each review already has a summary.'],
+    ['README.md', readme.replace('lists a sumary', 'lists a summary for each review'), 'continue'],
+    ['docs/widgets.md', 'Widgets are available offline.\n', 'stop', null, 'The offline mode in the reviewed implementation is unchanged.'],
+    ['docs/location.md', 'The country average.\n', 'continue'],
+    ['docs/drafts.md', '# Sharing\n\nAll members see drafts.\n', 'continue', null, 'Clarifies the audience.'],
+    ['docs/previews.md', '# Preview\n\nAll members see drafts.\n', 'continue', null, 'Clarifies the audience.'],
+    ['docs/server.md', 'python -m http.server 8080\n', 'continue', null, 'Updates the example.'],
+    ['docs/widgets-cli.md', 'widget fetch reports\n', 'continue', null, 'Clarifies the example.'],
+    ['docs/containers.md', '1. docker compose stop\n', 'continue', null, 'Clarifies the example.'],
+    ['docs/interval.md', '<h2>Deletion schedule</h2>\n\nAfter three days.\n', 'continue', null, 'Clarifies the text.'],
+    ['docs/audience.md', 'Drafts are visible to members.\n', 'continue', null, 'Clarifies the audience.'],
+    ['docs/account.md', '## Revoke credentials\n\nAfter three days.\n', 'continue', null, 'Clarifies the text.'],
+    ['README.md', readme.replace(instruction, 'The reports appear nightly.'), 'continue', null, 'Rephrases the nightly note.'],
+    ['docs/status.md', '# Overview\n\nThe report shows backup status, then run reboot.\n', 'continue', null, 'Clarifies the backup note.'],
+    ['README.md', readme.replace('sumary', 'summary'), 'continue', 'app.py', 'The review result already lists a summary.'],
+    ...contexts.map(([file, text, next]) => [file, text.replace(sentence, 'The report displays a total.'), next, null, contextRationale]),
+    ['docs/targets.md', cleanup.replace('test', 'production'), 'continue', null, 'Clarifies cleanup.'],
+    ['docs/storage.md', '# Snapshots\n\nPurge stable snapshots.\n', 'continue', null, 'Corrects the spelling.'],
+    ['README.md', readme.replace('The runner lists a sumary.', 'Run make nightly.'), 'continue', null, 'Clarifies the summary.'],
+    ['README.md', readme.replace('The runner lists a sumary.', 'Deploy to production when the tests pass.'), 'continue', null, 'Clarifies the summary.'],
+    ['README.md', readme.replace('The runner lists a sumary.', 'Only maintainers may grant permissions.'), 'continue', null, 'Clarifies the summary.'],
+    ['docs/agents.md', 'Reply with a summary.\n', 'continue', null, 'Corrects the spelling of summary.'],
+    ['docs/catalog.md', '---\n\ntitle: summary\n\n---\n', 'continue', null, 'Corrects the spelling of summary.'],
+    ['docs/writing.md', 'Editors may update all posts.\n', 'continue', null, 'Clarifies the wording.'],
+  ]) {
+    const { runId } = cli('code', ['begin', '--seat', 'codex', '--session', 'editorial', '--cwd', repo]).json;
+    fs.appendFileSync(path.join(repo, 'app.py'), '# reviewed\n');
+    commitAll(repo, 'Candidate');
+    startCodeRoundAndAttempt(runId);
+    ingestFixture(runId, 'backend-clean.json');
+    fs.writeFileSync(path.join(repo, file), data);
+    if (extra) fs.appendFileSync(path.join(repo, extra), '# amended\n');
+    amendAll(repo);
+    const doc = { review_rating: 8, no_further_review: true, editorial_reason: rationale,
+      verdicts: [], contest_rulings: [], assumptions: [], missed: [] };
+    const round = code.applyCodeVerdict(HOME, runId, 1, doc).rounds[0];
+    assert.equal(round.next, next, file);
+    if (next === 'stop') assert.ok(round.agreementReason.includes(rationale));
+    cli('code', ['waive', '--run', runId, '--reason', 'user approved: close fixture']);
+    gitc(repo, 'reset', '--hard', 'HEAD^');
+  }
 });
 
 test('code Stop promotion: receipted commits from a linked worktree, published commits and merge commits pass; a rebase with new trees blocks with the promotion hint until baseline; plain commits still block', () => {

@@ -143,9 +143,19 @@ completes, reads the result with `code wait --run "<run>" --max-wait 1s`. Every 
    node "<cross-debate-dir>/scripts/debate.mjs" code verdict --run "<run>" --round <n> --verdicts "<verdict-file>"
    A declared fix requires an actual candidate tree change; finish refuses next=continue.
    Continue iff a correction requires re-review and round < 3; repeat step 4 with the same run.
-   Set no_further_review true only when every amendment answers a non-blocking finding; the round then stops as
-   agreed if no blocking finding is live or unfixed and no missed entry carries a fix. Finish passes the amended
-   commit with unreviewedAmendment true, disclosed in the report, the receipt, and the push request.
+   Set `no_further_review` to true when the only changes address non-blocking findings and the verdict records
+   those fixes. Amendments that mix Markdown and code still need review, including advisory fixes.
+   For an editorial follow-up, inspect `git diff --ignore-submodules=none <reviewed-tree> <amended-tree>` and set the same
+   flag only if the wording describes already-reviewed behavior. The verdict records which files qualified.
+   A plain changelog entry can qualify with the flag alone. For a spelling correction or wording clarification,
+   add an `editorial_reason` explaining how you verified that the meaning stays the same. Cite evidence for each discarded blocker.
+   Changes to commands, deployment or deletion procedures, permissions, and agent instructions need another round,
+   as do confirmed or modified blockers and fixes for missed issues. Use another round if the meaning is unclear.
+   The runner checks both versions of the changed prose in the root README, changelog or Markdown under `docs/`.
+   A single broken README link can also qualify when a fixed advisory on that line names the correct target.
+   Only the destination may change. The target must already exist as a plain-prose Markdown file under `docs/`.
+   Other link changes and unrecognized edits continue to another review round.
+   Finish passes the exact agreed tree and discloses `unreviewedAmendment` in the report, receipt and push request.
    At round three, amended content is changed_after_review; do not claim it passed.
 
 8. Finish:

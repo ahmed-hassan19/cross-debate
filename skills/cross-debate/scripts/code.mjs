@@ -19,6 +19,7 @@ import {
   orchestratorUsageFromTranscript, upsertStatsRow, appendAuditRow, statsRowFromRun, statsCommand, parseArgs,
   scopeWarning, withRepositoryScopeLock,
 } from './lib/common.mjs';
+import { amendmentFiles, editorialReason } from './lib/editorial.mjs';
 import { failReviewAttempt, failureDetails, needsUserDecision, validateResume, authorizeResume, recordSelfReview, requireFinishDecision, resolveReviewOverride, modelIdentity, orchestratorModel } from './lib/recovery.mjs';
 
 const DEFAULT_TIMEOUT = '30m';
@@ -368,7 +369,8 @@ export function joinBackendFindings(backendRun, roundNo) {
     const axis = f.axis ?? d.axis ?? null;
     // Efficiency is advisory: never let it block a candidate, even from a run log written before the coercion existed.
     const severity = axis === 'efficiency' ? 'non-blocking' : (d.severity || f.severity);
-    findings.push({ id: `R${roundNo}:${f.id}`, backendId: f.id, lane: f.lane, status: d.status, severity, axis, file: f.file, line_start: f.line_start, line_end: f.line_end, claim: f.claim, evidence: f.evidence ?? '', recommendation: f.recommendation ?? d.recommendation ?? '', confidence: typeof f.confidence === 'number' ? f.confidence : null, debateVerdict: v ? v.verdict : null, debateReason: v ? v.reason : null, debateNote: d.debate_note ?? null, finalClaim: d.claim ?? null });
+    const finalAdvice = { file: d.file, line_start: d.line_start, line_end: d.line_end, recommendation: d.recommendation };
+    findings.push({ id: `R${roundNo}:${f.id}`, backendId: f.id, lane: f.lane, status: d.status, severity, axis, file: f.file, line_start: f.line_start, line_end: f.line_end, claim: f.claim, evidence: f.evidence ?? '', recommendation: f.recommendation ?? d.recommendation ?? '', confidence: typeof f.confidence === 'number' ? f.confidence : null, debateVerdict: v ? v.verdict : null, debateReason: v ? v.reason : null, debateNote: d.debate_note ?? null, finalClaim: d.claim ?? null, finalAdvice });
   }
   for (const id of dispositions.keys()) if (!all.some(f => f.id === id)) return { error: `final disposition ${id} has no source finding` };
   return { findings, summary: finalDoc.summary || main.summary || '' };
@@ -534,6 +536,31 @@ export function unfixedBlockers(round) {
   const verdictOf = new Map(round.verdict.verdicts.map(v => [v.id, v]));
   return round.review.findings.filter(f => { const v = verdictOf.get(f.id); return f.severity === 'blocking' && v && (v.verdict === 'confirm' || v.verdict === 'modify') && v.fixed !== true; }).map(f => f.id);
 }
+function agreementReason(root, round, doc) {
+  if (!round.changed || !doc.no_further_review || missedDeclaresChange(doc)) return null;
+  const rulings = new Map(doc.verdicts.map(v => [v.id, v]));
+  const blockers = round.review.findings.filter(f => f.severity === 'blocking');
+  if (blockers.some(f => {
+    const ruling = rulings.get(f.id);
+    return ruling.verdict !== 'discard' || ruling.fixed || ruling.change?.trim();
+  })) return null;
+  const trees = [round.candidateTree, round.headAfter.tree];
+  const files = amendmentFiles(root, trees);
+  const advisoryFixes = round.review.findings.filter(f => {
+    const ruling = rulings.get(f.id);
+    return f.severity === 'non-blocking' && ruling.verdict !== 'discard' && (ruling.fixed || ruling.change?.trim());
+  });
+  const onlyAdvisories = blockers.every(f => f.status === 'withdrawn');
+  if (files.some(f => /\.(?:md|markdown|mdx)$/i.test(f.path))) {
+    if (!blockers.every(f => rulings.get(f.id).evidence?.trim())) return null;
+    const linkFindings = onlyAdvisories && files.length === 1 ? advisoryFixes : [];
+    const reasons = files.map(file => editorialReason(root, trees, file, doc.editorial_reason, linkFindings));
+    if (reasons.some(reason => !reason)) return null;
+    const discarded = blockers.length ? `; discarded with evidence: ${blockers.map(f => f.id).join(', ')}` : '';
+    return reasons.join('; ') + discarded;
+  }
+  return advisoryFixes.length && onlyAdvisories ? 'Addressed non-blocking findings' : null;
+}
 export function applyCodeVerdict(home, runId, roundNo, doc) {
   const run = loadRun(home, runId);
   const identity = requireRunIdentity(run);
@@ -555,8 +582,8 @@ export function applyCodeVerdict(home, runId, roundNo, doc) {
     round.changed = changed;
     round.headAfter = { commit: state.head, tree: headTree };
     round.unfixedBlockers = unfixedBlockers(round);
-    // Agreed: no live blocking finding, nothing unfixed, no correction the reviewer never saw, and the orchestrator says so.
-    round.agreed = changed && !round.review.findings.some(f => f.severity === 'blocking' && f.status !== 'withdrawn') && round.unfixedBlockers.length === 0 && doc.no_further_review === true && !missedDeclaresChange(doc);
+    round.agreementReason = agreementReason(identity.worktreeRoot, round, doc);
+    round.agreed = Boolean(round.agreementReason);
     cur.code.checks.push(...(doc.checks || []).map(c => ({ ...c, round: roundNo })));
     const decision = roundNo >= MAX_ROUNDS ? { next: 'stop', stopReason: 'round_limit' } : !changed ? { next: 'stop', stopReason: 'no_changes' } : round.agreed ? { next: 'stop', stopReason: 'agreed' } : { next: 'continue', stopReason: null };
     round.next = decision.next;
@@ -581,7 +608,7 @@ function verdictCommand(flags) {
   try { doc = JSON.parse(fs.readFileSync(path.resolve(flags.verdicts), 'utf8')); } catch (e) { throw usage(`cannot read verdict file: ${e.message}`); }
   const run = applyCodeVerdict(home, runId, roundNo, doc);
   const round = run.rounds[roundNo - 1];
-  printJson({ ok: true, runId, round: roundNo, next: round.next, stopReason: round.stopReason, changed: round.changed, agreed: round.agreed, unfixedBlockers: round.unfixedBlockers, candidateCommit: run.code.candidateCommit, reviewedCommit: run.code.reviewedCommit, changedAfterReview: run.code.candidateTree !== run.code.reviewedTree, runStatus: run.status, roundsUsed: run.rounds.length, maxRounds: MAX_ROUNDS });
+  printJson({ ok: true, runId, round: roundNo, next: round.next, stopReason: round.stopReason, changed: round.changed, agreed: round.agreed, agreementReason: round.agreementReason, unfixedBlockers: round.unfixedBlockers, candidateCommit: run.code.candidateCommit, reviewedCommit: run.code.reviewedCommit, changedAfterReview: run.code.candidateTree !== run.code.reviewedTree, runStatus: run.status, roundsUsed: run.rounds.length, maxRounds: MAX_ROUNDS });
   return 0;
 }
 
@@ -598,9 +625,9 @@ export function computeOutcome(run, currentTree) {
   const attempt = currentAttempt(last);
   if (attempt && attempt.status === 'failed') return attempt.failure === 'bad_output' ? 'bad_output' : 'failed';
   if (!last.verdict) return null;
-  // an agreed stop passes the amended tree the verdict recorded; any later amendment is unreviewed
-  const agreedTree = last.stopReason === 'agreed' && last.headAfter ? last.headAfter.tree : null;
-  if (currentTree !== run.code.reviewedTree && currentTree !== agreedTree) return 'changed_after_review';
+  const verdictTree = last.headAfter?.tree ?? (last.changed ? null : run.code.reviewedTree);
+  if (currentTree !== verdictTree) return 'changed_after_review';
+  if (last.stopReason !== 'agreed' && currentTree !== run.code.reviewedTree) return 'changed_after_review';
   if (last.unfixedBlockers.length) return last.round >= MAX_ROUNDS ? 'exhausted_with_blockers' : 'blocked';
   return 'passed';
 }
